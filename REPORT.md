@@ -18,6 +18,8 @@
 
 [DOĞRULANDI] Release APK üretildi ancak imzasızdır: `app-release-unsigned.apk`, 7,085,535 byte. Kullanıcı keystore'u olmadan imzalı release üretilemez.
 
+[DOĞRULANDI] GitHub deposu ve herkese açık `v1.0.0` Release güncellendi: https://github.com/ereasaf9-hue/TouchMaster-Pro/releases/tag/v1.0.0. Release varlıkları: `SHA256SUMS.txt`, debug APK ve açıkça imzasız olarak adlandırılmış release APK.
+
 ## [YAZILDI-TEST EDİLMEDİ]
 
 Room DAO/repository/migration katmanı, tam makro yürütme ve görsel editör, JSON SAF yedekleme, yön değişiminde çalışan clicker'ın otomatik yeniden eşlenmesi, sanal butonlar, HUD, canlı CPS kalibrasyonu, gelişmiş hız profilleri, ses tuşu olayları, jiroskop, uygulama profillerinin kalıcı saklanması, tanılama ekranları ve Android 11–16 cihaz senaryoları.
@@ -26,7 +28,7 @@ Accessibility overlay kaynak kodu yazılmıştır; fiziksel Android cihazda serv
 
 ## [YAPILAMADI]
 
-GitHub'a gönderim ve release oluşturma yapılmadı; bu oturumda doğrulanmış GitHub deposu/yetkisi yoktur. İmzalı release APK üretilemedi; keystore ve imza sırları sağlanmadı. Android 11–16 fiziksel cihaz testi yapılamadı.
+İmzalı release APK üretilemedi; keystore ve imza sırları sağlanmadı. Android 11–16 fiziksel cihaz testi yapılamadı.
 
 ## Çalıştırılan komutlar
 
