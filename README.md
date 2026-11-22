@@ -2,7 +2,7 @@
 
 Android için Kotlin ve Jetpack Compose ile geliştirilen dokunma otomasyonu prototipi. Paket adı `com.touchmaster.pro`, minimum Android 8.0 (API 26).
 
-Kaynak kodundaki sürüm **1.1.2**'dir.
+Kaynak kodundaki sürüm **1.1.3**'tür.
 
 ## Özellikler
 
@@ -40,6 +40,7 @@ Shizuku Binder bağlantısı Ayarlar'da isteğe bağlı olarak kullanılabilir; 
 
 ## Sürüm notları
 
+- [v1.1.3 yayın notları](RELEASE_NOTES_v1.1.3.md)
 - [v1.1.2 yayın notları](RELEASE_NOTES_v1.1.2.md)
 - [v1.1.1 yayın notları](RELEASE_NOTES_v1.1.1.md)
 - [v1.1.0 yayın notları](RELEASE_NOTES_v1.1.0.md)
