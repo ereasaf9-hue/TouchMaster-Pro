@@ -5,11 +5,13 @@ Android için Kotlin ve Jetpack Compose ile geliştirilen dokunma otomasyonu pro
 ## Şu anki sürümde bulunanlar
 
 - Koyu temalı Türkçe Compose arayüzü, ana sayfa, makro metin düzenleyicisi, araçlar ve ayarlar sekmeleri.
-- Erişilebilirlik servisi: kullanıcı izni gerektirir; açıkça Başlat düğmesine basıldığında tek nokta dokunması gönderir. Servis ekran içeriğini okumaz.
-- Basit Auto Clicker: koordinat, tıklama aralığı ve tekrar sayısı ile başlat/durdur.
+- Erişilebilirlik servisi: kullanıcı izni gerektirir; ekran içeriğini okumadan kullanıcı tarafından konumlandırılan dokunma hedeflerini çalıştırır.
+- Yüzen kontrol paneli: hedef uygulama adı, ekle/sürükle/sil hedefleri, ayarlanabilir tıklama aralığı ve başlat/duraklat/devam et/acil durdur kontrolleri.
 - Saf Kotlin makro parser/validator: CLICK, PRESS, SWIPE, DELAY, LOOP, LOOP_FOREVER, END_LOOP ve STOP_MACRO komutları.
 - Koordinat doğrulama/normalizasyon yardımcıları ve birim testler.
 - Android release/debug derleme tanımları ve CI iş akışı.
+
+Hedef noktaları mevcut oturum boyunca tutulur. Panel kapandığında veya hedef uygulamadan çıkıldığında tıklama durdurulur ve hedefler temizlenir.
 
 ## Önemli kapsam sınırları
 
@@ -35,4 +37,4 @@ Shizuku uygulamasını kurup sunucusunu başlatın. TouchMaster ana ekranı veya
 İlk olarak uygulamadaki erişilebilirlik uyarısına dokunun, Android Ayarları'nda TouchMaster servisini bulun ve bilinçli şekilde etkinleştirin. Android 13+ sideload kısıtlamaları sebebiyle seçeneğin açılması için Uygulama bilgisi > menü > Kısıtlanmış ayarlara izin ver adımı gerekebilir. İzin yalnızca kullanıcı tarafından verilir.
 
 ## Sürüm notları
-v1.0.9 için [sürüm notlarına](RELEASE_NOTES_v1.0.9.md) bakın.
+v1.1.0 için [sürüm notlarına](RELEASE_NOTES_v1.1.0.md) bakın.

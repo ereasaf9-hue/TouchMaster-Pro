@@ -7,7 +7,7 @@ plugins {
 }
 
 android { namespace = "com.touchmaster.pro"; compileSdk = 35
-    defaultConfig { applicationId = "com.touchmaster.pro"; minSdk = 26; targetSdk = 35; versionCode = 9; versionName = "1.0.9"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
+    defaultConfig { applicationId = "com.touchmaster.pro"; minSdk = 26; targetSdk = 35; versionCode = 10; versionName = "1.1.0"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
     buildFeatures { compose = true; buildConfig = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.15" }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }

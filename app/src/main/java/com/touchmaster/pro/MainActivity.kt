@@ -140,18 +140,40 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launchApp(app: AppItem) {
-        if (!isAccessibilityEnabled() || !isShizukuGranted() || !isOverlayGranted()) {
-            Toast.makeText(this, "Önce Erişilebilirlik, Shizuku ve ekran üstü pencere izinlerini tamamlayın.", Toast.LENGTH_LONG).show()
+        val launchIntent = packageManager.getLaunchIntentForPackage(app.packageName)
+        if (launchIntent == null) {
+            Toast.makeText(this, "${app.label} için başlatılabilir bir ekran bulunamadı.", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (!isAccessibilityEnabled()) {
+            Toast.makeText(this, "Önce TouchMaster erişilebilirlik servisini etkinleştirin.", Toast.LENGTH_LONG).show()
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            return
+        }
+        if (!isShizukuGranted()) {
+            requestShizuku()
+            return
+        }
+        if (!isOverlayGranted()) {
+            Toast.makeText(this, "Kontrol paneli için ekran üstü gösterim izni gerekli.", Toast.LENGTH_LONG).show()
+            requestOverlay()
             return
         }
         val service = TouchMasterAccessibilityService.instance
         if (service == null) {
-            Toast.makeText(this, "Servis henüz hazır değil. Tekrar deneyin.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Erişilebilirlik servisi henüz hazır değil. Birkaç saniye sonra yeniden deneyin.", Toast.LENGTH_LONG).show()
             return
         }
-        service.showPanel(listOf(PointEntry(1L, 0.5f, 0.5f, "1")), ClickerSettings())
-        packageManager.getLaunchIntentForPackage(app.packageName)?.let(::startActivity)
+        try {
+            if (!service.showPanel(app.packageName, app.label, emptyList(), ClickerSettings())) {
+                Toast.makeText(this, "Kontrol paneli açılamadı. Ekran üstü iznini kontrol edin.", Toast.LENGTH_LONG).show()
+                return
+            }
+            startActivity(launchIntent)
+        } catch (_: RuntimeException) {
+            service.removePanel()
+            Toast.makeText(this, "${app.label} başlatılamadı. Uygulamanın yüklü olduğunu kontrol edin.", Toast.LENGTH_LONG).show()
+        }
     }
 
     @Composable
@@ -246,7 +268,7 @@ class MainActivity : ComponentActivity() {
         Card(onClick = onClick, shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = Panel), modifier = Modifier.height(154.dp)) {
             Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
                 Box(Modifier.size(58.dp).clip(RoundedCornerShape(17.dp)).background(PanelSoft), contentAlignment = Alignment.Center) { if (bitmap != null) Image(bitmap.asImageBitmap(), contentDescription = app.label, contentScale = ContentScale.Fit, modifier = Modifier.size(44.dp)) else Text("•", color = Blue, fontSize = 30.sp) }
-                Column { Text(app.label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("Hazırla  ›", color = Blue, fontSize = 12.sp) }
+                Column { Text(app.label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("Başlat  ›", color = Blue, fontSize = 12.sp) }
             }
         }
     }
