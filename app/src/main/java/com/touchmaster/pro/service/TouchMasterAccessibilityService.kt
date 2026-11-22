@@ -585,7 +585,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
             var downRawX = 0f
             var downRawY = 0f
             val longPressRunnable = Runnable {
-                if (!markerMoved && index in activePoints.indices) {
+                if (!longPressHandled && !markerMoved && index in activePoints.indices) {
                     longPressHandled = true
                     startTargetHold(index)
                 }
@@ -598,6 +598,10 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                         markerMoved = false
                         downRawX = event.rawX
                         downRawY = event.rawY
+                        if (!panelAttached) {
+                            longPressHandled = true
+                            startTargetHold(index)
+                        }
                         mainHandler.postDelayed(longPressRunnable, ViewConfiguration.getLongPressTimeout().toLong())
                         true
                     }
@@ -657,7 +661,9 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         val point = activePoints.getOrNull(index) ?: return
         val width = resources.displayMetrics.widthPixels.coerceAtLeast(1)
         val height = resources.displayMetrics.heightPixels.coerceAtLeast(1)
-        clicker.start(listOf(point), activeSettings, width, height)
+        // Holding a marker is explicitly time-controlled by the user's finger;
+        // do not let the profile's finite repetition count stop it early.
+        clicker.start(listOf(point), activeSettings.copy(repetitions = 0), width, height)
         setStatus("ÇALIŞIYOR · Hedef ${index + 1} · Parmağınızı çekince durur", ACCENT)
         runButton?.text = if (isCompactWidth()) "Duraklat" else "Ⅱ  Duraklat"
     }
