@@ -420,7 +420,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         targetRow.addView(targetInfo, LinearLayout.LayoutParams(0, dp(42), 1f))
         targetRow.addView(actionText("+ HEDEF EKLE", 116, 40, ACCENT_DARK) { addTarget() })
         content.addView(targetRow)
-        content.addView(label("Menü açıkken işaretçiyi sürükleyin; uzun basılı tutarak tek tıklayın.", 11, MUTED))
+        content.addView(label("Dokununca ayarlanan hızda çalışır. Menü açıkken sürükleyin; uzun basılı tutarak tek tıklayın.", 11, MUTED))
 
         content.addView(sectionTitle("TIKLAMA DAVRANIŞI"))
         intervalText = label("", 12, WHITE, bold = true)
@@ -562,9 +562,9 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                 background = rounded(ACCENT, 100)
                 elevation = dp(8).toFloat()
                 alpha = markerAlpha
-                contentDescription = "Hedef ${index + 1}. Menü açıkken sürükleyin; tek tıklamak için uzun basın."
+                contentDescription = "Hedef ${index + 1}. Basılı tuttuğunuz sürece ayarlanan hızda tıklar; menü açıkken sürükleyin."
                 isClickable = true
-                setOnClickListener { setStatus("Hedef seçildi · sürükleyerek konumlandırın", ACCENT) }
+                setOnClickListener { setStatus("Hedef ${index + 1} · tıklamak için basılı tutun", ACCENT) }
             }
             val size = dp(markerSizeDp)
             val params = WindowManager.LayoutParams(
@@ -587,7 +587,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
             val longPressRunnable = Runnable {
                 if (!markerMoved && index in activePoints.indices) {
                     longPressHandled = true
-                    clickTarget(index)
+                    startTargetHold(index)
                 }
             }
             pendingMarkerLongPresses += longPressRunnable
@@ -626,7 +626,8 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                     MotionEvent.ACTION_UP -> {
                         mainHandler.removeCallbacks(longPressRunnable)
                         pendingMarkerLongPresses.remove(longPressRunnable)
-                        if (!longPressHandled && !markerMoved) view.performClick()
+                        if (longPressHandled) stopTargetHold(index)
+                        else if (!markerMoved) view.performClick()
                         if (markerMoved) {
                             saveProfile()
                             syncRunningConfiguration()
@@ -637,6 +638,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                     MotionEvent.ACTION_CANCEL -> {
                         mainHandler.removeCallbacks(longPressRunnable)
                         pendingMarkerLongPresses.remove(longPressRunnable)
+                        if (longPressHandled) stopTargetHold(index)
                         true
                     }
                     else -> true
@@ -651,13 +653,19 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun clickTarget(index: Int) {
+    private fun startTargetHold(index: Int) {
         val point = activePoints.getOrNull(index) ?: return
         val width = resources.displayMetrics.widthPixels.coerceAtLeast(1)
         val height = resources.displayMetrics.heightPixels.coerceAtLeast(1)
-        serviceScope.launch {
-            executor.tap(listOf(point), width, height, activeSettings.pressMs)
-        }
+        clicker.start(listOf(point), activeSettings, width, height)
+        setStatus("ÇALIŞIYOR · Hedef ${index + 1} · Parmağınızı çekince durur", ACCENT)
+        runButton?.text = if (isCompactWidth()) "Duraklat" else "Ⅱ  Duraklat"
+    }
+
+    private fun stopTargetHold(index: Int) {
+        clicker.stop()
+        updateRunState(EngineState.OFF)
+        setStatus("DURDURULDU · Hedef ${index + 1}", WARNING)
     }
 
     private fun removeMarkers() {
