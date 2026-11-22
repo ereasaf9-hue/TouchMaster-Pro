@@ -39,6 +39,8 @@ import com.touchmaster.pro.data.AppItem
 import com.touchmaster.pro.data.ClickerSettings
 import com.touchmaster.pro.data.PointEntry
 import com.touchmaster.pro.service.TouchMasterAccessibilityService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private val Ink = Color(0xFF090A0F)
 private val Panel = Color(0xFF13151D)
@@ -48,8 +50,8 @@ private val Blue = Color(0xFF66D9FF)
 private val Muted = Color(0xFF9298A8)
 
 class MainActivity : ComponentActivity() {
-    private val apps by lazy {
-        packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+    private fun loadApps(): List<AppItem> {
+        return packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
             .filter { it.activityInfo.packageName != packageName }
             .map { AppItem(it.activityInfo.packageName, it.loadLabel(packageManager).toString(), it.activityInfo.applicationInfo) }
             .distinctBy { it.packageName }.sortedBy { it.label.lowercase() }
@@ -83,6 +85,8 @@ class MainActivity : ComponentActivity() {
     private fun TouchMasterApp() {
         var tab by remember { mutableIntStateOf(0) }
         var enabled by remember { mutableStateOf(isAccessibilityEnabled()) }
+        var apps by remember { mutableStateOf<List<AppItem>>(emptyList()) }
+        LaunchedEffect(Unit) { apps = withContext(Dispatchers.Default) { loadApps() } }
         Scaffold(containerColor = Ink, bottomBar = { BottomBar(tab) { tab = it } }) { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
                 when (tab) {
@@ -151,10 +155,11 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun AppCard(app: AppItem, onClick: () -> Unit) {
         val context = LocalContext.current
-        val icon = remember(app.packageName) { app.icon?.loadIcon(context.packageManager)?.toBitmap()?.asImageBitmap() }
+        val icon by produceState<Bitmap?>(initialValue = null, app.packageName) { value = withContext(Dispatchers.IO) { app.icon?.loadIcon(context.packageManager)?.toBitmap(96) } }
+        val bitmap = icon
         Card(onClick = onClick, shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = Panel), modifier = Modifier.height(154.dp)) {
             Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                Box(Modifier.size(58.dp).clip(RoundedCornerShape(17.dp)).background(PanelSoft), contentAlignment = Alignment.Center) { if (icon != null) Image(icon, contentDescription = app.label, contentScale = ContentScale.Fit, modifier = Modifier.size(44.dp)) else Text("•", color = Blue, fontSize = 30.sp) }
+                Box(Modifier.size(58.dp).clip(RoundedCornerShape(17.dp)).background(PanelSoft), contentAlignment = Alignment.Center) { if (bitmap != null) Image(bitmap.asImageBitmap(), contentDescription = app.label, contentScale = ContentScale.Fit, modifier = Modifier.size(44.dp)) else Text("•", color = Blue, fontSize = 30.sp) }
                 Column { Text(app.label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("Hazırla  ›", color = Blue, fontSize = 12.sp) }
             }
         }
@@ -170,6 +175,6 @@ class MainActivity : ComponentActivity() {
     @Composable private fun BottomBar(selected: Int, onSelect: (Int) -> Unit) { NavigationBar(containerColor = Color(0xFF0D0F15), tonalElevation = 0.dp) { listOf("⌂" to "Ana", "▦" to "Uygulamalar", "◇" to "Araçlar", "⚙" to "Ayarlar").forEachIndexed { i, pair -> NavigationBarItem(selected = selected == i, onClick = { onSelect(i) }, icon = { Text(pair.first, fontSize = 20.sp) }, label = { Text(pair.second, fontSize = 10.sp) }, colors = NavigationBarItemDefaults.colors(selectedIconColor = Blue, selectedTextColor = Blue, indicatorColor = Color(0xFF1C2330), unselectedIconColor = Muted, unselectedTextColor = Muted)) } } }
 }
 
-private fun Drawable.toBitmap(): Bitmap { if (this is BitmapDrawable && bitmap != null) return bitmap; val width = intrinsicWidth.coerceAtLeast(1); val height = intrinsicHeight.coerceAtLeast(1); val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888); val canvas = Canvas(result); setBounds(0, 0, width, height); draw(canvas); return result }
+private fun Drawable.toBitmap(maxSize: Int): Bitmap { if (this is BitmapDrawable && bitmap != null) return Bitmap.createScaledBitmap(bitmap, maxSize, maxSize, true); val sourceWidth = intrinsicWidth.coerceAtLeast(1); val sourceHeight = intrinsicHeight.coerceAtLeast(1); val scale = minOf(maxSize.toFloat() / sourceWidth, maxSize.toFloat() / sourceHeight); val width = (sourceWidth * scale).toInt().coerceAtLeast(1); val height = (sourceHeight * scale).toInt().coerceAtLeast(1); val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888); val canvas = Canvas(result); setBounds(0, 0, width, height); draw(canvas); return result }
 
 @Composable private fun TouchMasterTheme(content: @Composable () -> Unit) { MaterialTheme(colorScheme = darkColorScheme(primary = Violet, secondary = Blue, background = Ink, surface = Panel, onBackground = Color.White, onSurface = Color.White), content = content) }
