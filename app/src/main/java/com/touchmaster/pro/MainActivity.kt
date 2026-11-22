@@ -82,6 +82,10 @@ class MainActivity : ComponentActivity() {
     private fun requestBatteryOptimization() { if (!isBatteryOptimizationDisabled()) startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))) }
     private fun requestOverlay() { startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))) }
     private fun requestShizuku() { if (try { Shizuku.pingBinder() } catch (_: Throwable) { false }) Shizuku.requestPermission(7002) else Toast.makeText(this, "Önce Shizuku uygulamasını kurup başlatın.", Toast.LENGTH_LONG).show() }
+    private fun openAccessibilitySettings() {
+        val detail = Intent("android.settings.ACCESSIBILITY_DETAILS_SETTINGS").apply { data = Uri.parse("package:$packageName") }
+        if (detail.resolveActivity(packageManager) != null) startActivity(detail) else startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+    }
 
     private fun launchApp(app: AppItem) {
         if (!isAccessibilityEnabled() || !isShizukuGranted() || !isOverlayGranted()) {
@@ -117,10 +121,10 @@ class MainActivity : ComponentActivity() {
         Scaffold(containerColor = Ink, bottomBar = { BottomBar(tab) { tab = it } }) { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
                 when (tab) {
-                    0 -> HomeScreen(enabled, shizuku, overlay, { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)); enabled = isAccessibilityEnabled() }, { requestShizuku(); shizuku = isShizukuGranted() }, { requestOverlay(); overlay = isOverlayGranted() })
+                    0 -> HomeScreen(enabled, shizuku, overlay, { openAccessibilitySettings(); enabled = isAccessibilityEnabled() }, { requestShizuku(); shizuku = isShizukuGranted() }, { requestOverlay(); overlay = isOverlayGranted() })
                     1 -> AppsScreen(apps, ::launchApp)
                     2 -> ToolsScreen()
-                    else -> SettingsScreen(enabled, shizuku, overlay, notifications, batteryOptimization, { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)); enabled = isAccessibilityEnabled() }, { requestShizuku(); shizuku = isShizukuGranted() }, { requestOverlay(); overlay = isOverlayGranted() }, { requestNotifications(); notifications = isNotificationGranted() }, { requestBatteryOptimization(); batteryOptimization = isBatteryOptimizationDisabled() })
+                    else -> SettingsScreen(enabled, shizuku, overlay, notifications, batteryOptimization, { openAccessibilitySettings(); enabled = isAccessibilityEnabled() }, { requestShizuku(); shizuku = isShizukuGranted() }, { requestOverlay(); overlay = isOverlayGranted() }, { requestNotifications(); notifications = isNotificationGranted() }, { requestBatteryOptimization(); batteryOptimization = isBatteryOptimizationDisabled() })
                 }
             }
         }
