@@ -145,6 +145,10 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val foreground = event.packageName?.toString() ?: return
+        // Interacting with our own TYPE_APPLICATION_OVERLAY can produce a window
+        // event for this package. It is not a target-app transition; treating it
+        // as one removes markers immediately after tapping "+ HEDEF EKLE".
+        if (foreground == packageName) return
         if (foreground == targetPackage) {
             targetWasForeground = true
             if (bubble == null) {
@@ -167,8 +171,9 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                 bubble = null
                 bubbleParams = null
             }
-            // Do not dismiss a menu the user explicitly opened; markers are target-specific.
-            removeMarkers()
+            // Keep markers while a transient system window is over an explicitly
+            // open panel; the user is still editing the same target session.
+            if (!panelAttached || foreground !in transientSystemPackages) removeMarkers()
         }
     }
 

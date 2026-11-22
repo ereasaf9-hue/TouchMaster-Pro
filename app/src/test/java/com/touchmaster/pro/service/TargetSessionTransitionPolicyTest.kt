@@ -16,6 +16,11 @@ class TargetSessionTransitionPolicyTest {
     }
 
     @Test
+    fun ignoresTouchMasterOverlayWindowEvents() {
+        assertFalse(TargetSessionTransitionPolicy.shouldPauseClicker(true, "game.package", "com.touchmaster.pro"))
+    }
+
+    @Test
     fun doesNotPauseBeforeTargetHasBeenForeground() {
         assertFalse(TargetSessionTransitionPolicy.shouldPauseClicker(false, "game.package", "launcher.package"))
     }

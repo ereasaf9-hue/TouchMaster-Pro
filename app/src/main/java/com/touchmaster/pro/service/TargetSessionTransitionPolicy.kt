@@ -9,7 +9,8 @@ internal object TargetSessionTransitionPolicy {
     ): Boolean = targetWasForeground &&
         targetPackage != null &&
         foregroundPackage != null &&
-        foregroundPackage != targetPackage
+        foregroundPackage != targetPackage &&
+        foregroundPackage != "com.touchmaster.pro"
 
     fun shouldTemporarilyHideBubble(panelOpen: Boolean, isTransientSystemWindow: Boolean): Boolean =
         isTransientSystemWindow && !panelOpen
