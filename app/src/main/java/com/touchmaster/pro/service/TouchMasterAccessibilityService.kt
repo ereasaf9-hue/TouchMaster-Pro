@@ -22,11 +22,13 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     override fun onInterrupt() { clicker.stop() }
     fun showPanel(points: List<PointEntry>, settings: ClickerSettings) {
         if (panel != null) return
+        val activePoints = points.toMutableList()
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(12, 8, 12, 8); setBackgroundColor(0xEE151520.toInt()) }
-        val status = TextView(this).apply { text = "TouchMaster Pro • Hazır"; setTextColor(0xFFFFFFFF.toInt()) }
-        val start = Button(this).apply { text = "▶ Başlat"; setOnClickListener { clicker.toggle(points, settings, resources.displayMetrics.widthPixels, resources.displayMetrics.heightPixels); status.text = "Durum: ${clicker.state.value}" } }
+        val status = TextView(this).apply { text = "TouchMaster Pro • Hazır\nNokta: ${activePoints.size}"; setTextColor(0xFFFFFFFF.toInt()) }
+        val start = Button(this).apply { text = "▶ Başlat"; setOnClickListener { if (activePoints.isEmpty()) status.text = "Önce ➕ Nokta ekleyin" else { clicker.toggle(activePoints.toList(), settings, resources.displayMetrics.widthPixels, resources.displayMetrics.heightPixels); status.text = "Durum: ${clicker.state.value}" } } }
+        val addPoint = Button(this).apply { text = "➕ Nokta ekle"; setOnClickListener { val n = activePoints.size + 1; activePoints += PointEntry(n.toLong(), 0.5f, 0.5f, n.toString()); status.text = "TouchMaster Pro • Hazır\nNokta: ${activePoints.size}" } }
         val stop = Button(this).apply { text = "⏹ Acil durdur"; setOnClickListener { clicker.stop(); status.text = "Durum: Durduruldu" } }
-        box.addView(status); box.addView(start); box.addView(stop)
+        box.addView(status); box.addView(start); box.addView(addPoint); box.addView(stop)
         val params = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.END; y = 80 }
         getSystemService(WindowManager::class.java).addView(box, params); panel = box
     }

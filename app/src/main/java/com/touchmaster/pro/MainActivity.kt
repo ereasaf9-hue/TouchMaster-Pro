@@ -16,6 +16,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.touchmaster.pro.data.AppItem
+import com.touchmaster.pro.data.ClickerSettings
+import com.touchmaster.pro.data.PointEntry
+import com.touchmaster.pro.service.TouchMasterAccessibilityService
+import android.widget.Toast
 
 class MainActivity : ComponentActivity() {
     private val apps by lazy {
@@ -55,7 +59,17 @@ class MainActivity : ComponentActivity() {
                 Text("TouchMaster Pro", style = MaterialTheme.typography.headlineMedium, color = Color(0xFF00C8FF))
                 when (tab) {
                     0 -> { Card { Column(Modifier.padding(16.dp)) { Text("Erişilebilirlik", color = Color.White); Text(if (enabled) "Açık" else "Kapalı", color = if (enabled) Color.Green else Color.Red); if (!enabled) Button(onClick = openSettings) { Text("Etkinleştir") } } }; Text("Çekirdek motor hazır. Overlay paneli servis açıldıktan sonra gösterilir.", color = Color.LightGray) }
-                    1 -> { Text("Uygulamalarım", style = MaterialTheme.typography.titleLarge); LazyColumn { items(apps) { app -> Card(onClick = { packageManager.getLaunchIntentForPackage(app.packageName)?.let(::startActivity) }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) { Text(app.label, Modifier.padding(16.dp), color = Color.White) } } } }
+                    1 -> { Text("Uygulamalarım", style = MaterialTheme.typography.titleLarge); Text("Bir uygulama seçtiğinde kontrol paneli ekranda açılır.", color = Color.LightGray); LazyColumn { items(apps) { app -> Card(onClick = {
+                        if (!isAccessibilityEnabled()) { Toast.makeText(this@MainActivity, "Önce Erişilebilirlik hizmetini açın.", Toast.LENGTH_LONG).show(); startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                        else {
+                            val service = TouchMasterAccessibilityService.instance
+                            if (service == null) Toast.makeText(this@MainActivity, "Erişilebilirlik servisi henüz bağlanmadı. Tekrar deneyin.", Toast.LENGTH_LONG).show()
+                            else {
+                                service.showPanel(listOf(PointEntry(1L, 0.5f, 0.5f, "1")), ClickerSettings())
+                                packageManager.getLaunchIntentForPackage(app.packageName)?.let(::startActivity)
+                            }
+                        }
+                    }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) { Column(Modifier.padding(16.dp)) { Text(app.label, color = Color.White); Text("Paneli aç ve hazırla", color = Color(0xFF00C8FF)) } } } } }
                     2 -> Text("Araçlar\n\nAuto Clicker • Nokta Editörü • Makrolar", color = Color.White)
                     else -> Text("Ayarlar\n\nKesinti politikası: Yeniden dene\nGörünüm ve güvenlik ayarları", color = Color.White)
                 }
