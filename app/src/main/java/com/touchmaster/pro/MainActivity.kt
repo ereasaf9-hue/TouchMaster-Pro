@@ -1,5 +1,6 @@
 package com.touchmaster.pro
 
+import android.Manifest
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Intent
 import android.graphics.Bitmap
@@ -7,7 +8,10 @@ import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.os.Bundle
+import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
+import android.net.Uri
 import android.view.accessibility.AccessibilityManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -34,6 +38,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.unit.sp
 import com.touchmaster.pro.data.AppItem
 import com.touchmaster.pro.data.ClickerSettings
@@ -66,6 +73,11 @@ class MainActivity : ComponentActivity() {
         .getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
         .any { it.resolveInfo.serviceInfo.packageName == packageName }
 
+    private fun isNotificationGranted() = Build.VERSION.SDK_INT < 33 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    private fun isBatteryOptimizationDisabled() = (getSystemService(POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(packageName)
+    private fun requestNotifications() { if (Build.VERSION.SDK_INT >= 33 && !isNotificationGranted()) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7001) }
+    private fun requestBatteryOptimization() { if (!isBatteryOptimizationDisabled()) startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))) }
+
     private fun launchApp(app: AppItem) {
         if (!isAccessibilityEnabled()) {
             Toast.makeText(this, "Önce Erişilebilirlik hizmetini etkinleştirin.", Toast.LENGTH_LONG).show()
@@ -85,7 +97,15 @@ class MainActivity : ComponentActivity() {
     private fun TouchMasterApp() {
         var tab by remember { mutableIntStateOf(0) }
         var enabled by remember { mutableStateOf(isAccessibilityEnabled()) }
+        var notifications by remember { mutableStateOf(isNotificationGranted()) }
+        var batteryOptimization by remember { mutableStateOf(isBatteryOptimizationDisabled()) }
         var apps by remember { mutableStateOf<List<AppItem>>(emptyList()) }
+        val lifecycleOwner = LocalLifecycleOwner.current
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) { enabled = isAccessibilityEnabled(); notifications = isNotificationGranted(); batteryOptimization = isBatteryOptimizationDisabled() } }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
         LaunchedEffect(Unit) { apps = withContext(Dispatchers.Default) { loadApps() } }
         Scaffold(containerColor = Ink, bottomBar = { BottomBar(tab) { tab = it } }) { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
@@ -93,7 +113,7 @@ class MainActivity : ComponentActivity() {
                     0 -> HomeScreen(enabled) { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)); enabled = isAccessibilityEnabled() }
                     1 -> AppsScreen(apps, ::launchApp)
                     2 -> ToolsScreen()
-                    else -> SettingsScreen(enabled) { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)); enabled = isAccessibilityEnabled() }
+                    else -> SettingsScreen(enabled, notifications, batteryOptimization, { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)); enabled = isAccessibilityEnabled() }, { requestNotifications(); notifications = isNotificationGranted() }, { requestBatteryOptimization(); batteryOptimization = isBatteryOptimizationDisabled() })
                 }
             }
         }
@@ -107,19 +127,14 @@ class MainActivity : ComponentActivity() {
             Spacer(Modifier.height(6.dp))
             Text("Oyun ve uygulamalar için sade, görünür dokunma araçları.", color = Muted, fontSize = 14.sp)
             Spacer(Modifier.height(24.dp))
-            Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = Panel), modifier = Modifier.fillMaxWidth()) {
+            if (!enabled) Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = Panel), modifier = Modifier.fillMaxWidth()) {
                 Box(Modifier.background(Brush.linearGradient(listOf(Color(0xFF25213C), Panel)))) {
                     Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(48.dp).clip(CircleShape).background(Violet.copy(alpha = .18f)), contentAlignment = Alignment.Center) { Text("✦", color = Violet, fontSize = 24.sp) }
-                            Spacer(Modifier.width(14.dp))
-                            Column { Text("Erişilebilirlik", color = Color.White, fontWeight = FontWeight.Medium); Text(if (enabled) "Hizmet aktif" else "Kurulum gerekiyor", color = if (enabled) Blue else Color(0xFFFFB86B), fontSize = 13.sp) }
-                        }
-                        if (!enabled) Button(onClick = openSettings, shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Violet), modifier = Modifier.fillMaxWidth()) { Text("Hizmeti etkinleştir", color = Ink, fontWeight = FontWeight.Bold) }
-                        else Text("Hazır. Uygulamalarım sekmesinden bir uygulama seçerek paneli açın.", color = Color(0xFFBFC4D2), fontSize = 13.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(48.dp).clip(CircleShape).background(Violet.copy(alpha = .18f)), contentAlignment = Alignment.Center) { Text("✦", color = Violet, fontSize = 24.sp) }; Spacer(Modifier.width(14.dp)); Column { Text("Kurulum gerekiyor", color = Color.White, fontWeight = FontWeight.Medium); Text("Erişilebilirlik hizmetini açın", color = Color(0xFFFFB86B), fontSize = 13.sp) } }
+                        Button(onClick = openSettings, shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Violet), modifier = Modifier.fillMaxWidth()) { Text("Hizmeti etkinleştir", color = Ink, fontWeight = FontWeight.Bold) }
                     }
                 }
-            }
+            } else Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = Panel), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(22.dp)) { Text("Hazır", color = Blue, fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(6.dp)); Text("Uygulamalarım sekmesinden bir uygulama seçerek başlayın.", color = Color(0xFFBFC4D2), fontSize = 13.sp) } }
             Spacer(Modifier.height(18.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                 MetricCard("01", "Aktif profil", Modifier.weight(1f))
@@ -166,7 +181,7 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable private fun ToolsScreen() { SimpleSection("Araçlar", "TOOLS", listOf("Auto Clicker" to "Nokta bazlı otomasyon", "Multi Touch" to "Birden fazla hedef", "Swipe" to "Kaydırma hareketleri", "Makrolar" to "Adım adım komutlar")) }
-    @Composable private fun SettingsScreen(enabled: Boolean, openSettings: () -> Unit) { Column(Modifier.fillMaxSize().padding(horizontal = 22.dp)) { Header("Ayarlar", "SETTINGS"); Text("Tercihler", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(18.dp)); SettingRow("Erişilebilirlik", if (enabled) "Açık" else "Kapalı", if (!enabled) openSettings else null); SettingRow("Panel görünümü", "Koyu cam", null); SettingRow("Güvenlik", "Hedef uygulamadan çıkınca durdur", null) } }
+    @Composable private fun SettingsScreen(enabled: Boolean, notifications: Boolean, batteryOptimization: Boolean, openSettings: () -> Unit, requestNotifications: () -> Unit, requestBatteryOptimization: () -> Unit) { Column(Modifier.fillMaxSize().padding(horizontal = 22.dp)) { Header("Ayarlar", "SETTINGS"); Text("İzinler", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold); Text("Zorunlu olan yalnızca Erişilebilirlik'tir. Diğerleri isteğe bağlıdır.", color = Muted, fontSize = 13.sp); Spacer(Modifier.height(18.dp)); SettingRow("Erişilebilirlik", if (enabled) "Açık" else "Kapalı", if (!enabled) openSettings else null); if (Build.VERSION.SDK_INT >= 33) SettingRow("Bildirimler", if (notifications) "Açık" else "Önerilir", if (!notifications) requestNotifications else null); SettingRow("Pil optimizasyonu", if (batteryOptimization) "Devre dışı" else "Önerilir", if (!batteryOptimization) requestBatteryOptimization else null); Spacer(Modifier.height(18.dp)); Text("Görünüm", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold); SettingRow("Panel görünümü", "Koyu cam", null); SettingRow("Güvenlik", "Hedef uygulamadan çıkınca durdur", null) } }
     @Composable private fun SimpleSection(title: String, eyebrow: String, rows: List<Pair<String, String>>) { Column(Modifier.fillMaxSize().padding(horizontal = 22.dp)) { Header(title, eyebrow); Text(title, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(18.dp)); rows.forEach { (a, b) -> SettingRow(a, b, null) } } }
     @Composable private fun SettingRow(title: String, subtitle: String, action: (() -> Unit)?) { Card(onClick = { action?.invoke() }, shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = Panel), modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)) { Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(title, color = Color.White, fontWeight = FontWeight.Medium); Text(subtitle, color = Muted, fontSize = 12.sp) }; if (action != null) Text("→", color = Blue, fontSize = 22.sp) } } }
     @Composable private fun MetricCard(value: String, label: String, modifier: Modifier) { Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = Panel), modifier = modifier) { Column(Modifier.padding(16.dp)) { Text(value, color = Blue, fontSize = 22.sp, fontWeight = FontWeight.SemiBold); Text(label, color = Muted, fontSize = 12.sp) } } }

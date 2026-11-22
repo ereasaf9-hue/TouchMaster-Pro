@@ -1,0 +1,2 @@
+eb4c7a21f76674be954740c054bf70e83cde507e3fba280fece337cfde0c5ba3  TouchMaster-Pro-v1.0.4-debug.apk
+42e5e260add37003da3ed301e230bde51a9b9a190156fdcd276bfa9bb8e67be3  TouchMaster-Pro-v1.0.4-unsigned-release.apk
