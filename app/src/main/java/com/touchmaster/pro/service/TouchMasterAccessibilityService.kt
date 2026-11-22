@@ -2,6 +2,7 @@ package com.touchmaster.pro.service
 
 import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
+import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
@@ -14,7 +15,11 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import com.touchmaster.pro.data.ClickerSettings
@@ -29,6 +34,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlin.math.roundToInt
 
 @SuppressLint("SetTextI18n", "ClickableViewAccessibility")
@@ -36,12 +43,14 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     companion object {
         val connected = MutableStateFlow(false)
         var instance: TouchMasterAccessibilityService? = null
-        private const val PANEL_WIDTH_DP = 320
-        private const val MIN_PANEL_WIDTH_DP = 220
-        private const val MARKER_SIZE_DP = 42
+
+        private const val PANEL_WIDTH_DP = 340
         private const val TARGET_EXIT_GRACE_MS = 900L
         private const val MIN_INTERVAL_MS = 50L
         private const val MAX_INTERVAL_MS = 5_000L
+        private const val MIN_PRESS_MS = 10L
+        private const val MAX_PRESS_MS = 500L
+        private const val PROFILE_PREFS = "touchmaster_game_profiles"
         private const val CARD = 0xF21A1D27.toInt()
         private const val PANEL_BUTTON = 0xFF2B3040.toInt()
         private const val ACCENT = 0xFF65D7FF.toInt()
@@ -61,19 +70,35 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var windowManager: WindowManager
+
+    private var bubble: View? = null
+    private var bubbleParams: WindowManager.LayoutParams? = null
     private var panel: LinearLayout? = null
     private var panelParams: WindowManager.LayoutParams? = null
+    private var panelAttached = false
     private var statusText: TextView? = null
     private var targetCountText: TextView? = null
     private var intervalText: TextView? = null
+    private var pressText: TextView? = null
+    private var repeatText: TextView? = null
     private var runButton: TextView? = null
+
     private val activePoints = mutableListOf<PointEntry>()
     private val markerViews = mutableListOf<View>()
     private var activeSettings = ClickerSettings()
     private var targetPackage: String? = null
     private var targetLabel: String = "Uygulama"
     private var lastForegroundPackage: String? = null
-    private var collapsed = false
+
+    private var bubbleAlpha = 0.96f
+    private var bubbleSizeDp = 58
+    private var bubbleXFraction = 0.94f
+    private var bubbleYFraction = 0.26f
+    private var markerAlpha = 0.86f
+    private var markerSizeDp = 42
+    private var panelAlpha = 0.97f
+    private var panelXFraction = 0.04f
+    private var panelYFraction = 0.12f
 
     private val leaveTargetRunnable = Runnable {
         if (targetPackage != null && lastForegroundPackage != targetPackage) removePanel()
@@ -86,9 +111,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         connected.value = true
         executor = AccessibilityGestureExecutor(this)
         clicker = ClickerEngine(executor)
-        serviceScope.launch {
-            clicker.state.collect { state -> updateRunState(state) }
-        }
+        serviceScope.launch { clicker.state.collect { state -> updateRunState(state) } }
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
@@ -125,7 +148,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         updateRunState(EngineState.OFF)
     }
 
-    /** Creates the session overlay only after the target app and required permissions are validated. */
+    /** Starts a target-app session. Only the round TouchMaster bubble is shown initially. */
     fun showPanel(
         targetPackage: String,
         targetLabel: String,
@@ -137,88 +160,192 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         this.targetPackage = targetPackage
         this.targetLabel = targetLabel
         lastForegroundPackage = null
-        activePoints.clear()
-        activePoints.addAll(points)
         activeSettings = settings
-        collapsed = false
-
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(14), dp(16), dp(14))
-            background = rounded(CARD, 22)
-            elevation = dp(12).toFloat()
-        }
-        panel = root
-        buildPanel(root)
-
-        val params = WindowManager.LayoutParams(
-            minOf(dp(PANEL_WIDTH_DP), (resources.displayMetrics.widthPixels - dp(24)).coerceAtLeast(dp(MIN_PANEL_WIDTH_DP))),
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT,
-        ).apply {
-            gravity = Gravity.TOP or Gravity.END
-            x = dp(12)
-            y = dp(96)
-        }
-        panelParams = params
+        activePoints.clear()
+        loadProfile(targetPackage, points, settings)
         return try {
-            windowManager.addView(root, params)
+            createBubble()
             renderMarkers()
-            updatePanelContent()
+            saveProfile()
             true
         } catch (_: RuntimeException) {
-            panel = null
-            panelParams = null
-            removeMarkers()
-            this.targetPackage = null
+            removePanel()
             false
         }
     }
 
-    private fun buildPanel(root: LinearLayout) {
-        val header = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+    private fun createBubble() {
+        val size = dp(bubbleSizeDp)
+        val view = FrameLayout(this).apply {
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(ACCENT_DARK, 0xFF7A5CFF.toInt()),
+            ).apply { cornerRadius = size.toFloat() }
+            elevation = dp(10).toFloat()
+            contentDescription = "TouchMaster denetim menüsünü aç"
+            isClickable = true
+            setOnClickListener { toggleSettingsPanel() }
+            addView(ImageView(this@TouchMasterAccessibilityService).apply {
+                setImageResource(com.touchmaster.pro.R.drawable.ic_launcher)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                contentDescription = null
+            }, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER))
         }
+        val metrics = resources.displayMetrics
+        val params = WindowManager.LayoutParams(
+            size,
+            size,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = (bubbleXFraction * (metrics.widthPixels - size).coerceAtLeast(0)).roundToInt()
+            y = (bubbleYFraction * (metrics.heightPixels - size).coerceAtLeast(0)).roundToInt().coerceAtLeast(dp(24))
+        }
+        bubble = view
+        bubbleParams = params
+        view.alpha = bubbleAlpha
+        val down = IntArray(2)
+        val origin = IntArray(2)
+        var moved = false
+        view.setOnTouchListener { target, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    moved = false
+                    down[0] = event.rawX.roundToInt()
+                    down[1] = event.rawY.roundToInt()
+                    origin[0] = params.x
+                    origin[1] = params.y
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX.roundToInt() - down[0]
+                    val dy = event.rawY.roundToInt() - down[1]
+                    val slop = ViewConfiguration.get(this).scaledTouchSlop
+                    if (kotlin.math.abs(dx) > slop || kotlin.math.abs(dy) > slop) moved = true
+                    if (moved) {
+                        val maxX = (resources.displayMetrics.widthPixels - size).coerceAtLeast(0)
+                        val maxY = (resources.displayMetrics.heightPixels - size).coerceAtLeast(dp(24))
+                        params.x = (origin[0] + dx).coerceIn(0, maxX)
+                        params.y = (origin[1] + dy).coerceIn(dp(24), maxY)
+                        updateBubbleLayout()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (moved) {
+                        bubbleXFraction = params.x.toFloat() / (resources.displayMetrics.widthPixels - size).coerceAtLeast(1)
+                        bubbleYFraction = params.y.toFloat() / (resources.displayMetrics.heightPixels - size).coerceAtLeast(1)
+                        saveProfile()
+                    } else target.performClick()
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> true
+                else -> true
+            }
+        }
+        windowManager.addView(view, params)
+    }
+
+    private fun toggleSettingsPanel() {
+        if (panelAttached) hideSettingsPanel() else showSettingsPanel()
+    }
+
+    private fun showSettingsPanel() {
+        if (targetPackage == null) return
+        if (panel == null) {
+            val root = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(16), dp(14), dp(16), dp(14))
+                background = rounded(CARD, 22)
+                elevation = dp(12).toFloat()
+            }
+            panel = root
+            buildPanel(root)
+            val metrics = resources.displayMetrics
+            val width = minOf(dp(PANEL_WIDTH_DP), (metrics.widthPixels - dp(16)).coerceAtLeast(dp(180)))
+            val height = minOf(dp(620), (metrics.heightPixels - dp(100)).coerceAtLeast(dp(200)))
+            panelParams = WindowManager.LayoutParams(
+                width,
+                height,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT,
+            ).apply {
+                gravity = Gravity.TOP or Gravity.END
+                x = (panelXFraction * (metrics.widthPixels - width).coerceAtLeast(0)).roundToInt()
+                y = (panelYFraction * (metrics.heightPixels - height).coerceAtLeast(dp(24))).roundToInt().coerceAtLeast(dp(24))
+            }
+        }
+        val view = panel ?: return
+        val params = panelParams ?: return
+        view.alpha = panelAlpha
+        try {
+            if (!panelAttached) {
+                windowManager.addView(view, params)
+                panelAttached = true
+            }
+            updatePanelContent()
+        } catch (_: RuntimeException) {
+            Toast.makeText(this, "Ayar menüsü gösterilemedi. Ekran üstü iznini kontrol edin.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun hideSettingsPanel() {
+        val view = panel ?: return
+        if (!panelAttached) return
+        try { windowManager.removeView(view) } catch (_: RuntimeException) { }
+        panelAttached = false
+    }
+
+    private fun buildPanel(root: LinearLayout) {
+        val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val titleColumn = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        titleColumn.addView(label("TOUCHMASTER", 10, MUTED, bold = true).apply { letterSpacing = .12f })
+        titleColumn.addView(label("TOUCHMASTER · DENETİM", 10, ACCENT, bold = true))
         titleColumn.addView(label(targetLabel, 17, WHITE, bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
         header.addView(titleColumn, LinearLayout.LayoutParams(0, dp(48), 1f))
-        val minimize = actionText("—", 40, 40, PANEL_BUTTON) { toggleCollapsed() }
-        val close = actionText("×", 40, 40, PANEL_BUTTON) { removePanel() }
-        header.addView(minimize, marginParams(40, 40, start = 6))
-        header.addView(close, marginParams(40, 40, start = 8))
+        header.addView(actionText("⌄", 36, 36, PANEL_BUTTON) { hideSettingsPanel() }, marginParams(36, 36, start = 4))
+        header.addView(actionText("×", 36, 36, PANEL_BUTTON) { removePanel() }, marginParams(36, 36, start = 4))
+
         val dragStart = IntArray(2)
-        val windowStart = IntArray(2)
-        var headerMoved = false
-        titleColumn.setOnClickListener { toggleCollapsed() }
+        val origin = IntArray(2)
+        var moved = false
+        titleColumn.contentDescription = "Menüyü taşımak için sürükleyin; dokununca menü küçülür."
+        titleColumn.setOnClickListener { hideSettingsPanel() }
         titleColumn.setOnTouchListener { view, event ->
             val params = panelParams ?: return@setOnTouchListener false
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    headerMoved = false
+                    moved = false
                     dragStart[0] = event.rawX.roundToInt()
                     dragStart[1] = event.rawY.roundToInt()
-                    windowStart[0] = params.x
-                    windowStart[1] = params.y
+                    origin[0] = params.x
+                    origin[1] = params.y
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    val deltaX = event.rawX.roundToInt() - dragStart[0]
-                    val deltaY = event.rawY.roundToInt() - dragStart[1]
-                    if (kotlin.math.abs(deltaX) > ViewConfiguration.get(this).scaledTouchSlop ||
-                        kotlin.math.abs(deltaY) > ViewConfiguration.get(this).scaledTouchSlop) headerMoved = true
-                    val maxX = (resources.displayMetrics.widthPixels - params.width).coerceAtLeast(0)
-                    val maxY = (resources.displayMetrics.heightPixels - (panel?.height ?: 0)).coerceAtLeast(dp(24))
-                    params.x = (windowStart[0] - deltaX).coerceIn(0, maxX)
-                    params.y = (windowStart[1] + deltaY).coerceIn(dp(24), maxY)
+                    val dx = event.rawX.roundToInt() - dragStart[0]
+                    val dy = event.rawY.roundToInt() - dragStart[1]
+                    val slop = ViewConfiguration.get(this).scaledTouchSlop
+                    if (kotlin.math.abs(dx) > slop || kotlin.math.abs(dy) > slop) moved = true
+                    val metrics = resources.displayMetrics
+                    val maxX = (metrics.widthPixels - params.width).coerceAtLeast(0)
+                    val maxY = (metrics.heightPixels - params.height).coerceAtLeast(dp(24))
+                    params.x = (origin[0] - dx).coerceIn(0, maxX)
+                    params.y = (origin[1] + dy).coerceIn(dp(24), maxY)
                     updatePanelLayout()
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!headerMoved) view.performClick()
+                    if (moved) {
+                        val metrics = resources.displayMetrics
+                        panelXFraction = params.x.toFloat() / (metrics.widthPixels - params.width).coerceAtLeast(1)
+                        panelYFraction = params.y.toFloat() / (metrics.heightPixels - params.height).coerceAtLeast(1)
+                        saveProfile()
+                    } else view.performClick()
                     true
                 }
                 MotionEvent.ACTION_CANCEL -> true
@@ -226,41 +353,127 @@ class TouchMasterAccessibilityService : AccessibilityService() {
             }
         }
         root.addView(header)
-        root.addView(spacer(10))
-
-        val statusRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        statusText = label("HAZIR · Başlamak için hedef ekleyin", 12, ACCENT, bold = true)
-        statusRow.addView(statusText, LinearLayout.LayoutParams(0, dp(32), 1f))
-        targetCountText = label("0 hedef", 12, MUTED)
-        statusRow.addView(targetCountText)
-        root.addView(statusRow)
         root.addView(divider())
 
-        val targetRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        val targetInfo = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        targetInfo.addView(label("DOKUNMA NOKTALARI", 11, WHITE, bold = true))
-        targetInfo.addView(label("Numaralı hedefi sürükleyin", 11, MUTED))
-        targetRow.addView(targetInfo, LinearLayout.LayoutParams(0, dp(46), 1f))
-        targetRow.addView(actionText("+ HEDEF", 86, 38, ACCENT_DARK) { addTarget() })
-        root.addView(targetRow)
-        root.addView(spacer(8))
+        val scroll = ScrollView(this).apply { isFillViewport = false; overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(4), 0, dp(6))
+        }
+        scroll.addView(content)
+        root.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
 
-        val speedRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        speedRow.addView(label("Tıklama aralığı", 13, WHITE), LinearLayout.LayoutParams(0, dp(40), 1f))
-        speedRow.addView(actionText("−", 38, 36, PANEL_BUTTON) { changeInterval(-50) })
-        intervalText = label("${activeSettings.intervalMs} ms", 12, WHITE, bold = true).apply { gravity = Gravity.CENTER }
-        speedRow.addView(intervalText, LinearLayout.LayoutParams(dp(66), dp(36)))
-        speedRow.addView(actionText("+", 38, 36, PANEL_BUTTON) { changeInterval(50) })
-        root.addView(speedRow)
-        root.addView(spacer(10))
+        val statusRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        statusText = label("HAZIR · Bir hedef ekleyin", 12, ACCENT, bold = true)
+        statusRow.addView(statusText, LinearLayout.LayoutParams(0, dp(34), 1f))
+        targetCountText = label("0 hedef", 12, MUTED)
+        statusRow.addView(targetCountText)
+        content.addView(statusRow)
+
+        content.addView(sectionTitle("HEDEF NOKTALARI"))
+        val targetRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        val targetInfo = label("Numaralı işaretçiyi ekranda sürükleyin", 12, MUTED)
+        targetRow.addView(targetInfo, LinearLayout.LayoutParams(0, dp(42), 1f))
+        targetRow.addView(actionText("+ HEDEF EKLE", 116, 40, ACCENT_DARK) { addTarget() })
+        content.addView(targetRow)
+        content.addView(label("İşaretçiyi uzun basılı tutarak kaldırabilirsiniz.", 11, MUTED))
+
+        content.addView(sectionTitle("TIKLAMA DAVRANIŞI"))
+        intervalText = label("", 12, WHITE, bold = true)
+        content.addView(stepperRow("Tıklama aralığı", intervalText!!, "−", "＋", { changeInterval(-50) }, { changeInterval(50) }))
+        pressText = label("", 12, WHITE, bold = true)
+        content.addView(stepperRow("Basılı tutma süresi", pressText!!, "−", "＋", { changePress(-10) }, { changePress(10) }))
+        repeatText = label("", 12, WHITE, bold = true)
+        content.addView(stepperRow("Tekrar", repeatText!!, "−", "＋", { changeRepeats(-1) }, { changeRepeats(1) }))
+
+        content.addView(sectionTitle("GÖRÜNÜM VE KONUM"))
+        addSlider(content, "Balon saydamlığı", 35, 100, (bubbleAlpha * 100).roundToInt(), { "$it%" }) {
+            bubbleAlpha = it / 100f
+            bubble?.alpha = bubbleAlpha
+            saveProfile()
+        }
+        addSlider(content, "Balon boyutu", 44, 80, bubbleSizeDp, { "$it dp" }) {
+            bubbleSizeDp = it
+            resizeBubble()
+            saveProfile()
+        }
+        addSlider(content, "Hedef saydamlığı", 25, 100, (markerAlpha * 100).roundToInt(), { "$it%" }) {
+            markerAlpha = it / 100f
+            markerViews.forEach { marker -> marker.alpha = markerAlpha }
+            saveProfile()
+        }
+        addSlider(content, "Hedef boyutu", 28, 72, markerSizeDp, { "$it dp" }) {
+            markerSizeDp = it
+            renderMarkers()
+            saveProfile()
+        }
+        addSlider(content, "Menü saydamlığı", 55, 100, (panelAlpha * 100).roundToInt(), { "$it%" }) {
+            panelAlpha = it / 100f
+            panel?.alpha = panelAlpha
+            saveProfile()
+        }
+        content.addView(label("Balonu taşımak için balonu, menüyü taşımak için üst başlığı sürükleyin.", 11, MUTED))
 
         val controls = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        runButton = actionText("▶  Başlat", 0, 46, ACCENT_DARK) { toggleRun() }.apply { gravity = Gravity.CENTER }
-        controls.addView(runButton, LinearLayout.LayoutParams(0, dp(46), 1f))
-        controls.addView(actionText("■  Durdur", 94, 46, STOP_DARK) { stopRun() }, marginParams(94, 46, start = 8))
-        root.addView(controls)
-        root.addView(spacer(4))
-        root.addView(label("Bir hedefe uzun basarak kaldırabilirsiniz.", 10, MUTED).apply { gravity = Gravity.CENTER })
+        runButton = actionText("▶  Başlat", 0, 48, ACCENT_DARK) { toggleRun() }.apply { gravity = Gravity.CENTER }
+        controls.addView(runButton, LinearLayout.LayoutParams(0, dp(48), 1f))
+        controls.addView(actionText("■  Durdur", 96, 48, STOP_DARK) { stopRun() }, marginParams(96, 48, start = 8))
+        content.addView(spacer(12))
+        content.addView(controls)
+    }
+
+    private fun sectionTitle(text: String) = label(text, 10, ACCENT, bold = true).apply {
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(34)).apply { topMargin = dp(8) }
+    }
+
+    private fun stepperRow(
+        title: String,
+        value: TextView,
+        minus: String,
+        plus: String,
+        onMinus: () -> Unit,
+        onPlus: () -> Unit,
+    ): LinearLayout {
+        val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        row.addView(label(title, 13, WHITE), LinearLayout.LayoutParams(0, dp(42), 1f))
+        row.addView(actionText(minus, 36, 34, PANEL_BUTTON, onMinus))
+        value.gravity = Gravity.CENTER
+        row.addView(value, LinearLayout.LayoutParams(dp(82), dp(38)))
+        row.addView(actionText(plus, 36, 34, PANEL_BUTTON, onPlus))
+        return row
+    }
+
+    private fun addSlider(
+        parent: LinearLayout,
+        title: String,
+        min: Int,
+        max: Int,
+        current: Int,
+        format: (Int) -> String,
+        onChanged: (Int) -> Unit,
+    ) {
+        val row = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val labelRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        labelRow.addView(label(title, 12, WHITE), LinearLayout.LayoutParams(0, dp(26), 1f))
+        val valueLabel = label(format(current.coerceIn(min, max)), 12, ACCENT, bold = true)
+        labelRow.addView(valueLabel)
+        row.addView(labelRow)
+        row.addView(SeekBar(this).apply {
+            this.max = max - min
+            progress = current.coerceIn(min, max) - min
+            progressTintList = android.content.res.ColorStateList.valueOf(ACCENT)
+            thumbTintList = android.content.res.ColorStateList.valueOf(ACCENT)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    val value = min + progress
+                    valueLabel.text = format(value)
+                    if (fromUser) onChanged(value)
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+            })
+        })
+        parent.addView(row)
     }
 
     private fun addTarget() {
@@ -268,6 +481,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         activePoints += PointEntry(id, 0.5f, 0.5f, id.toString())
         renderMarkers()
         updatePanelContent()
+        saveProfile()
         Toast.makeText(this, "Hedef eklendi. Numaralı daireyi istediğiniz noktaya sürükleyin.", Toast.LENGTH_SHORT).show()
     }
 
@@ -277,13 +491,14 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         activePoints.removeAt(index)
         renderMarkers()
         updatePanelContent()
+        saveProfile()
         Toast.makeText(this, "Hedef $label kaldırıldı.", Toast.LENGTH_SHORT).show()
     }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun renderMarkers() {
         removeMarkers()
-        if (panel == null) return
+        if (targetPackage == null) return
         val metrics = resources.displayMetrics
         activePoints.forEachIndexed { index, point ->
             val marker = TextView(this).apply {
@@ -294,9 +509,12 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                 gravity = Gravity.CENTER
                 background = rounded(ACCENT, 100)
                 elevation = dp(8).toFloat()
+                alpha = markerAlpha
                 contentDescription = "Hedef ${index + 1}. Sürükleyin; kaldırmak için uzun basın."
+                isClickable = true
+                setOnClickListener { setStatus("Hedef seçildi · sürükleyerek konumlandırın", ACCENT) }
             }
-            val size = dp(MARKER_SIZE_DP)
+            val size = dp(markerSizeDp)
             val params = WindowManager.LayoutParams(
                 size, size, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -312,12 +530,9 @@ class TouchMasterAccessibilityService : AccessibilityService() {
             }
             var longPressHandled = false
             var markerMoved = false
-            val longPressRunnable = Runnable {
-                longPressHandled = true
-                removeTarget(index)
-            }
             var downRawX = 0f
             var downRawY = 0f
+            val longPressRunnable = Runnable { longPressHandled = true; removeTarget(index) }
             marker.setOnTouchListener { view, event ->
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
@@ -329,8 +544,8 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                         true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
-                        if (kotlin.math.abs(event.rawX - downRawX) > touchSlop || kotlin.math.abs(event.rawY - downRawY) > touchSlop) {
+                        val slop = ViewConfiguration.get(this).scaledTouchSlop
+                        if (kotlin.math.abs(event.rawX - downRawX) > slop || kotlin.math.abs(event.rawY - downRawY) > slop) {
                             markerMoved = true
                             mainHandler.removeCallbacks(longPressRunnable)
                         }
@@ -350,17 +565,15 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                     }
                     MotionEvent.ACTION_UP -> {
                         mainHandler.removeCallbacks(longPressRunnable)
-                        if (!longPressHandled && !markerMoved) view.performClick() else updatePanelContent()
+                        if (!longPressHandled && !markerMoved) view.performClick()
+                        if (markerMoved) saveProfile()
+                        updatePanelContent()
                         true
                     }
-                    MotionEvent.ACTION_CANCEL -> {
-                        mainHandler.removeCallbacks(longPressRunnable)
-                        true
-                    }
+                    MotionEvent.ACTION_CANCEL -> { mainHandler.removeCallbacks(longPressRunnable); true }
                     else -> true
                 }
             }
-            marker.setOnClickListener { setStatus("Hedef seçildi · sürükleyerek konumlandırın", ACCENT) }
             try {
                 windowManager.addView(marker, params)
                 markerViews += marker
@@ -371,15 +584,13 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     }
 
     private fun removeMarkers() {
-        markerViews.forEach { marker ->
-            try { windowManager.removeView(marker) } catch (_: RuntimeException) { }
-        }
+        markerViews.forEach { marker -> try { windowManager.removeView(marker) } catch (_: RuntimeException) { } }
         markerViews.clear()
     }
 
     private fun toggleRun() {
         if (activePoints.isEmpty()) {
-            setStatus("Önce + HEDEF ile hedef ekleyin", ACCENT)
+            setStatus("Önce + HEDEF EKLE ile hedef ekleyin", ACCENT)
             return
         }
         val width = resources.displayMetrics.widthPixels.coerceAtLeast(1)
@@ -399,26 +610,31 @@ class TouchMasterAccessibilityService : AccessibilityService() {
 
     private fun changeInterval(delta: Long) {
         activeSettings = activeSettings.copy(intervalMs = (activeSettings.intervalMs + delta).coerceIn(MIN_INTERVAL_MS, MAX_INTERVAL_MS))
-        intervalText?.text = "${activeSettings.intervalMs} ms"
+        saveProfile()
+        updatePanelContent()
+    }
+
+    private fun changePress(delta: Long) {
+        activeSettings = activeSettings.copy(pressMs = (activeSettings.pressMs + delta).coerceIn(MIN_PRESS_MS, MAX_PRESS_MS))
+        saveProfile()
+        updatePanelContent()
+    }
+
+    private fun changeRepeats(delta: Int) {
+        val next = (activeSettings.repetitions + delta).coerceIn(0, 100_000)
+        activeSettings = activeSettings.copy(repetitions = next)
+        saveProfile()
+        updatePanelContent()
     }
 
     private fun updateRunState(state: EngineState) {
         if (panel == null) return
         when (state) {
-            EngineState.RUNNING -> {
-                setStatus("ÇALIŞIYOR · Dokunmak için Başlat/Duraklat", ACCENT)
-                runButton?.text = "Ⅱ  Duraklat"
-            }
-            EngineState.PAUSED -> {
-                setStatus("DURAKLATILDI · Devam etmek için dokunun", WARNING)
-                runButton?.text = "▶  Devam et"
-            }
-            EngineState.ERROR -> {
-                setStatus("HATA · Erişilebilirlik servisini kontrol edin", ERROR)
-                runButton?.text = "▶  Yeniden dene"
-            }
+            EngineState.RUNNING -> { setStatus("ÇALIŞIYOR · Dokununca duraklatılır", ACCENT); runButton?.text = "Ⅱ  Duraklat" }
+            EngineState.PAUSED -> { setStatus("DURAKLATILDI · Devam etmek için dokunun", WARNING); runButton?.text = "▶  Devam et" }
+            EngineState.ERROR -> { setStatus("HATA · Erişilebilirlik servisini kontrol edin", ERROR); runButton?.text = "▶  Yeniden dene" }
             else -> {
-                setStatus(if (activePoints.isEmpty()) "HAZIR · Başlamak için hedef ekleyin" else "HAZIR · Başlatmaya hazır", ACCENT)
+                setStatus(if (activePoints.isEmpty()) "HAZIR · Bir hedef ekleyin" else "HAZIR · Başlatmaya hazır", ACCENT)
                 runButton?.text = "▶  Başlat"
             }
         }
@@ -427,44 +643,133 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     private fun updatePanelContent() {
         targetCountText?.text = "${activePoints.size} hedef"
         intervalText?.text = "${activeSettings.intervalMs} ms"
-        if (clicker.state.value != EngineState.RUNNING && clicker.state.value != EngineState.PAUSED) {
-            updateRunState(clicker.state.value)
-        }
-    }
-
-    private fun toggleCollapsed() {
-        collapsed = !collapsed
-        panel?.let { root ->
-            for (index in 1 until root.childCount) root.getChildAt(index).visibility = if (collapsed) View.GONE else View.VISIBLE
-            panelParams?.let {
-                try { windowManager.updateViewLayout(root, it) } catch (_: RuntimeException) { }
-            }
-        }
+        pressText?.text = "${activeSettings.pressMs} ms"
+        repeatText?.text = if (activeSettings.repetitions == 0) "Süresiz" else "${activeSettings.repetitions} kez"
+        if (clicker.state.value != EngineState.RUNNING && clicker.state.value != EngineState.PAUSED) updateRunState(clicker.state.value)
     }
 
     fun removePanel() {
         mainHandler.removeCallbacks(leaveTargetRunnable)
         if (::clicker.isInitialized) clicker.stop()
         removeMarkers()
-        panel?.let { view ->
-            try { windowManager.removeView(view) } catch (_: RuntimeException) { }
-        }
+        bubble?.let { view -> try { windowManager.removeView(view) } catch (_: RuntimeException) { } }
+        bubble = null
+        bubbleParams = null
+        panel?.let { view -> try { windowManager.removeView(view) } catch (_: RuntimeException) { } }
         panel = null
         panelParams = null
+        panelAttached = false
         statusText = null
         targetCountText = null
         intervalText = null
+        pressText = null
+        repeatText = null
         runButton = null
         activePoints.clear()
         targetPackage = null
         lastForegroundPackage = null
-        collapsed = false
+    }
+
+    private fun updateBubbleLayout() {
+        val view = bubble ?: return
+        val params = bubbleParams ?: return
+        try { windowManager.updateViewLayout(view, params) } catch (_: RuntimeException) { }
+    }
+
+    private fun resizeBubble() {
+        val view = bubble ?: return
+        val params = bubbleParams ?: return
+        val size = dp(bubbleSizeDp)
+        params.width = size
+        params.height = size
+        view.background = GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            intArrayOf(ACCENT_DARK, 0xFF7A5CFF.toInt()),
+        ).apply { cornerRadius = size.toFloat() }
+        val metrics = resources.displayMetrics
+        params.x = (bubbleXFraction * (metrics.widthPixels - size).coerceAtLeast(0)).roundToInt()
+        params.y = (bubbleYFraction * (metrics.heightPixels - size).coerceAtLeast(dp(24))).roundToInt().coerceAtLeast(dp(24))
+        try { windowManager.updateViewLayout(view, params) } catch (_: RuntimeException) { }
     }
 
     private fun updatePanelLayout() {
         val view = panel ?: return
         val params = panelParams ?: return
         try { windowManager.updateViewLayout(view, params) } catch (_: RuntimeException) { }
+    }
+
+    private fun loadProfile(packageName: String, fallbackPoints: List<PointEntry>, defaults: ClickerSettings) {
+        val stored = getSharedPreferences(PROFILE_PREFS, Context.MODE_PRIVATE).getString("profile:$packageName", null)
+        if (stored == null) {
+            activePoints.clear()
+            activePoints.addAll(fallbackPoints)
+            activeSettings = defaults
+            return
+        }
+        try {
+            val profile = JSONObject(stored)
+            bubbleAlpha = profile.optDouble("bubbleAlpha", bubbleAlpha.toDouble()).toFloat().coerceIn(.35f, 1f)
+            bubbleSizeDp = profile.optInt("bubbleSizeDp", bubbleSizeDp).coerceIn(44, 80)
+            bubbleXFraction = profile.optDouble("bubbleX", bubbleXFraction.toDouble()).toFloat().coerceIn(0f, 1f)
+            bubbleYFraction = profile.optDouble("bubbleY", bubbleYFraction.toDouble()).toFloat().coerceIn(0f, 1f)
+            markerAlpha = profile.optDouble("markerAlpha", markerAlpha.toDouble()).toFloat().coerceIn(.25f, 1f)
+            markerSizeDp = profile.optInt("markerSizeDp", markerSizeDp).coerceIn(28, 72)
+            panelAlpha = profile.optDouble("panelAlpha", panelAlpha.toDouble()).toFloat().coerceIn(.55f, 1f)
+            panelXFraction = profile.optDouble("panelX", panelXFraction.toDouble()).toFloat().coerceIn(0f, 1f)
+            panelYFraction = profile.optDouble("panelY", panelYFraction.toDouble()).toFloat().coerceIn(0f, 1f)
+            activeSettings = defaults.copy(
+                intervalMs = profile.optLong("intervalMs", defaults.intervalMs).coerceIn(MIN_INTERVAL_MS, MAX_INTERVAL_MS),
+                pressMs = profile.optLong("pressMs", defaults.pressMs).coerceIn(MIN_PRESS_MS, MAX_PRESS_MS),
+                repetitions = profile.optInt("repetitions", defaults.repetitions).coerceIn(0, 100_000),
+            )
+            activePoints.clear()
+            val savedPoints = profile.optJSONArray("points")
+            if (savedPoints == null) activePoints.addAll(fallbackPoints)
+            else for (i in 0 until savedPoints.length()) {
+                val point = savedPoints.optJSONObject(i) ?: continue
+                activePoints += PointEntry(
+                    id = point.optLong("id", (i + 1).toLong()).coerceAtLeast(1L),
+                    xFrac = point.optDouble("x", .5).toFloat().coerceIn(0f, 1f),
+                    yFrac = point.optDouble("y", .5).toFloat().coerceIn(0f, 1f),
+                    label = point.optString("label", (i + 1).toString()),
+                )
+            }
+        } catch (_: Exception) {
+            activePoints.clear()
+            activePoints.addAll(fallbackPoints)
+            activeSettings = defaults
+        }
+    }
+
+    private fun saveProfile() {
+        val packageName = targetPackage ?: return
+        val profile = JSONObject().apply {
+            put("bubbleAlpha", bubbleAlpha)
+            put("bubbleSizeDp", bubbleSizeDp)
+            put("bubbleX", bubbleXFraction)
+            put("bubbleY", bubbleYFraction)
+            put("markerAlpha", markerAlpha)
+            put("markerSizeDp", markerSizeDp)
+            put("panelAlpha", panelAlpha)
+            put("panelX", panelXFraction)
+            put("panelY", panelYFraction)
+            put("intervalMs", activeSettings.intervalMs)
+            put("pressMs", activeSettings.pressMs)
+            put("repetitions", activeSettings.repetitions)
+            put("points", JSONArray().apply {
+                activePoints.forEach { point ->
+                    put(JSONObject().apply {
+                        put("id", point.id)
+                        put("x", point.xFrac)
+                        put("y", point.yFrac)
+                        put("label", point.label)
+                    })
+                }
+            })
+        }
+        getSharedPreferences(PROFILE_PREFS, Context.MODE_PRIVATE).edit()
+            .putString("profile:$packageName", profile.toString())
+            .apply()
     }
 
     private fun setStatus(message: String, color: Int) {
@@ -505,14 +810,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     }
 
     private fun spacer(heightDp: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(heightDp)) }
-
     private fun marginParams(width: Int, height: Int, start: Int) = LinearLayout.LayoutParams(dp(width), dp(height)).apply { marginStart = dp(start) }
-
-    private fun rounded(color: Int, radiusDp: Int) = GradientDrawable().apply {
-        setColor(color)
-        cornerRadius = dp(radiusDp).toFloat()
-    }
-
+    private fun rounded(color: Int, radiusDp: Int) = GradientDrawable().apply { setColor(color); cornerRadius = dp(radiusDp).toFloat() }
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
-
 }

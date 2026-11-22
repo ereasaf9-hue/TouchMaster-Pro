@@ -6,12 +6,15 @@ Android için Kotlin ve Jetpack Compose ile geliştirilen dokunma otomasyonu pro
 
 - Koyu temalı Türkçe Compose arayüzü, ana sayfa, makro metin düzenleyicisi, araçlar ve ayarlar sekmeleri.
 - Erişilebilirlik servisi: kullanıcı izni gerektirir; ekran içeriğini okumadan kullanıcı tarafından konumlandırılan dokunma hedeflerini çalıştırır.
-- Yüzen kontrol paneli: hedef uygulama adı, ekle/sürükle/sil hedefleri, ayarlanabilir tıklama aralığı ve başlat/duraklat/devam et/acil durdur kontrolleri.
+- Oyun üstü TouchMaster balonu: oturum başlangıcında yalnızca uygulama logosunu taşıyan taşınabilir yuvarlak düğme görünür; dokununca ayrıntılı, kaydırılabilir denetim menüsü açılır.
+- Hedef düzenleme: numaralı hedef ekleme, sürükleyerek konumlandırma ve uzun basarak silme; tıklama aralığı, basılı tutma süresi ve tekrar sayısı kontrolleri.
+- Görünüm ayarları: balon ve hedefler için ayrı saydamlık/boyut; menü saydamlığı ve menüyü başlık çubuğundan sürükleyerek konumlandırma.
+- Uygulama başına profil: hedef noktaları, tıklama davranışı, balon/menü konumu ve görünüm tercihleri sonraki oturumlar için saklanır.
 - Saf Kotlin makro parser/validator: CLICK, PRESS, SWIPE, DELAY, LOOP, LOOP_FOREVER, END_LOOP ve STOP_MACRO komutları.
 - Koordinat doğrulama/normalizasyon yardımcıları ve birim testler.
 - Android release/debug derleme tanımları ve CI iş akışı.
 
-Hedef noktaları mevcut oturum boyunca tutulur. Panel kapandığında veya hedef uygulamadan çıkıldığında tıklama durdurulur ve hedefler temizlenir.
+Balon menüsü gizlendiğinde oyun üstünde balon ve hedefler kalır. Hedef uygulamadan çıkıldığında çalışan tıklama durdurulur ve oturum overlay'leri temizlenir; ayarlar uygulama başına profilde saklanır.
 
 ## Önemli kapsam sınırları
 
@@ -37,4 +40,4 @@ Shizuku uygulamasını kurup sunucusunu başlatın. TouchMaster ana ekranı veya
 İlk olarak uygulamadaki erişilebilirlik uyarısına dokunun, Android Ayarları'nda TouchMaster servisini bulun ve bilinçli şekilde etkinleştirin. Android 13+ sideload kısıtlamaları sebebiyle seçeneğin açılması için Uygulama bilgisi > menü > Kısıtlanmış ayarlara izin ver adımı gerekebilir. İzin yalnızca kullanıcı tarafından verilir.
 
 ## Sürüm notları
-v1.1.0 için [sürüm notlarına](RELEASE_NOTES_v1.1.0.md) bakın.
+v1.1.1 için [sürüm notlarına](RELEASE_NOTES_v1.1.1.md), önceki sürüm için [v1.1.0 notlarına](RELEASE_NOTES_v1.1.0.md) bakın.
