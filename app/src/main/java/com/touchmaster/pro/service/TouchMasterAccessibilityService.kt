@@ -29,7 +29,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         val addPoint = Button(this).apply { text = "➕ Nokta ekle"; setOnClickListener { val n = activePoints.size + 1; activePoints += PointEntry(n.toLong(), 0.5f, 0.5f, n.toString()); status.text = "TouchMaster Pro • Hazır\nNokta: ${activePoints.size}" } }
         val stop = Button(this).apply { text = "⏹ Acil durdur"; setOnClickListener { clicker.stop(); status.text = "Durum: Durduruldu" } }
         box.addView(status); box.addView(start); box.addView(addPoint); box.addView(stop)
-        val params = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.END; y = 80 }
+        val params = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.END; y = 80 }
         getSystemService(WindowManager::class.java).addView(box, params); panel = box
     }
     fun removePanel() { panel?.let { getSystemService(WindowManager::class.java).removeView(it) }; panel = null }
