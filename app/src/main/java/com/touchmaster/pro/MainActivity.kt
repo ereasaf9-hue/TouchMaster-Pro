@@ -50,6 +50,7 @@ import rikka.shizuku.Shizuku
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+private const val SHIZUKU_PERMISSION_REQUEST = 7002
 private val Ink = Color(0xFF090A0F)
 private val Panel = Color(0xFF13151D)
 private val PanelSoft = Color(0xFF1A1D27)
@@ -58,6 +59,25 @@ private val Blue = Color(0xFF66D9FF)
 private val Muted = Color(0xFF9298A8)
 
 class MainActivity : ComponentActivity() {
+    private val shizukuGrantedState = mutableStateOf(false)
+    private val binderReceivedListener = Shizuku.OnBinderReceivedListener { refreshShizukuState() }
+    private val binderDeadListener = Shizuku.OnBinderDeadListener { refreshShizukuState() }
+    private val permissionResultListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+        if (requestCode == SHIZUKU_PERMISSION_REQUEST) {
+            refreshShizukuState()
+            val message = if (grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                "Shizuku bağlantı izni verildi."
+            } else {
+                "Shizuku izni reddedildi. Shizuku uygulamasından yeniden izin verebilirsiniz."
+            }
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun refreshShizukuState() {
+        runOnUiThread { shizukuGrantedState.value = isShizukuGranted() }
+    }
+
     private fun loadApps(): List<AppItem> {
         return packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
             .filter { it.activityInfo.packageName != packageName }
@@ -67,7 +87,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
+        Shizuku.addBinderDeadListener(binderDeadListener)
+        Shizuku.addRequestPermissionResultListener(permissionResultListener)
+        refreshShizukuState()
         setContent { TouchMasterTheme { TouchMasterApp() } }
+    }
+
+    override fun onDestroy() {
+        Shizuku.removeBinderReceivedListener(binderReceivedListener)
+        Shizuku.removeBinderDeadListener(binderDeadListener)
+        Shizuku.removeRequestPermissionResultListener(permissionResultListener)
+        super.onDestroy()
     }
 
     private fun isAccessibilityEnabled() = (getSystemService(ACCESSIBILITY_SERVICE) as AccessibilityManager)
@@ -77,11 +108,32 @@ class MainActivity : ComponentActivity() {
     private fun isNotificationGranted() = Build.VERSION.SDK_INT < 33 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED
     private fun isBatteryOptimizationDisabled() = (getSystemService(POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(packageName)
     private fun isOverlayGranted() = Settings.canDrawOverlays(this)
-    private fun isShizukuGranted(): Boolean = try { Shizuku.pingBinder() && Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED } catch (_: Throwable) { false }
+    private fun isShizukuGranted(): Boolean = try {
+        !Shizuku.isPreV11() && Shizuku.pingBinder() &&
+            Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED
+    } catch (_: RuntimeException) {
+        false
+    }
     private fun requestNotifications() { if (Build.VERSION.SDK_INT >= 33 && !isNotificationGranted()) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7001) }
     private fun requestBatteryOptimization() { if (!isBatteryOptimizationDisabled()) startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))) }
     private fun requestOverlay() { startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))) }
-    private fun requestShizuku() { if (try { Shizuku.pingBinder() } catch (_: Throwable) { false }) Shizuku.requestPermission(7002) else Toast.makeText(this, "Önce Shizuku uygulamasını kurup başlatın.", Toast.LENGTH_LONG).show() }
+    private fun requestShizuku() {
+        try {
+            if (Shizuku.isPreV11()) {
+                Toast.makeText(this, "Shizuku API v11 veya üzeri gerekir. Shizuku uygulamasını güncelleyin.", Toast.LENGTH_LONG).show()
+            } else if (!Shizuku.pingBinder()) {
+                Toast.makeText(this, "Shizuku sunucusu çalışmıyor. Shizuku uygulamasını açıp sunucuyu başlatın.", Toast.LENGTH_LONG).show()
+            } else if (Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                refreshShizukuState()
+                Toast.makeText(this, "Shizuku bağlantısı zaten etkin.", Toast.LENGTH_SHORT).show()
+            } else {
+                Shizuku.requestPermission(SHIZUKU_PERMISSION_REQUEST)
+            }
+        } catch (_: RuntimeException) {
+            Toast.makeText(this, "Shizuku bağlantısı kurulamadı. Sunucunun çalıştığını kontrol edin.", Toast.LENGTH_LONG).show()
+            refreshShizukuState()
+        }
+    }
     private fun openAccessibilitySettings() {
         val detail = Intent("android.settings.ACCESSIBILITY_DETAILS_SETTINGS").apply { data = Uri.parse("package:$packageName") }
         if (detail.resolveActivity(packageManager) != null) startActivity(detail) else startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -106,7 +158,7 @@ class MainActivity : ComponentActivity() {
     private fun TouchMasterApp() {
         var tab by remember { mutableIntStateOf(0) }
         var enabled by remember { mutableStateOf(isAccessibilityEnabled()) }
-        var shizuku by remember { mutableStateOf(isShizukuGranted()) }
+        var shizuku by remember { shizukuGrantedState }
         var overlay by remember { mutableStateOf(isOverlayGranted()) }
         var notifications by remember { mutableStateOf(isNotificationGranted()) }
         var batteryOptimization by remember { mutableStateOf(isBatteryOptimizationDisabled()) }
