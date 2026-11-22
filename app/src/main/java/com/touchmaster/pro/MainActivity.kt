@@ -117,7 +117,7 @@ class MainActivity : ComponentActivity() {
         Scaffold(containerColor = Ink, bottomBar = { BottomBar(tab) { tab = it } }) { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
                 when (tab) {
-                    0 -> HomeScreen(enabled, shizuku, overlay) { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)); enabled = isAccessibilityEnabled() }
+                    0 -> HomeScreen(enabled, shizuku, overlay, { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)); enabled = isAccessibilityEnabled() }, { requestShizuku(); shizuku = isShizukuGranted() }, { requestOverlay(); overlay = isOverlayGranted() })
                     1 -> AppsScreen(apps, ::launchApp)
                     2 -> ToolsScreen()
                     else -> SettingsScreen(enabled, shizuku, overlay, notifications, batteryOptimization, { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)); enabled = isAccessibilityEnabled() }, { requestShizuku(); shizuku = isShizukuGranted() }, { requestOverlay(); overlay = isOverlayGranted() }, { requestNotifications(); notifications = isNotificationGranted() }, { requestBatteryOptimization(); batteryOptimization = isBatteryOptimizationDisabled() })
@@ -127,7 +127,7 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun HomeScreen(enabled: Boolean, shizuku: Boolean, overlay: Boolean, openSettings: () -> Unit) {
+    private fun HomeScreen(enabled: Boolean, shizuku: Boolean, overlay: Boolean, openAccessibility: () -> Unit, openShizuku: () -> Unit, openOverlay: () -> Unit) {
         Column(Modifier.fillMaxSize().padding(horizontal = 22.dp)) {
             Header("TouchMaster", "PRO CONTROL")
             Text("Kontrol merkezi", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
@@ -138,10 +138,18 @@ class MainActivity : ComponentActivity() {
                 Box(Modifier.background(Brush.linearGradient(listOf(Color(0xFF25213C), Panel)))) {
                     Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(48.dp).clip(CircleShape).background(Violet.copy(alpha = .18f)), contentAlignment = Alignment.Center) { Text("✦", color = Violet, fontSize = 24.sp) }; Spacer(Modifier.width(14.dp)); Column { Text("Kurulum gerekiyor", color = Color.White, fontWeight = FontWeight.Medium); Text("Erişilebilirlik: ${if (enabled) "Açık" else "Kapalı"}", color = if (enabled) Blue else Color(0xFFFFB86B), fontSize = 13.sp); Text("Shizuku: ${if (shizuku) "Açık" else "Kapalı"}  •  Üstte göster: ${if (overlay) "Açık" else "Kapalı"}", color = Muted, fontSize = 12.sp) } }
-                        Button(onClick = openSettings, shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Violet), modifier = Modifier.fillMaxWidth()) { Text("Hizmeti etkinleştir", color = Ink, fontWeight = FontWeight.Bold) }
+                        if (!enabled) Button(onClick = openAccessibility, shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Violet), modifier = Modifier.fillMaxWidth()) { Text("Erişilebilirliği etkinleştir", color = Ink, fontWeight = FontWeight.Bold) }
+                        if (enabled && !shizuku) Button(onClick = openShizuku, shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Violet), modifier = Modifier.fillMaxWidth()) { Text("Shizuku'yu etkinleştir", color = Ink, fontWeight = FontWeight.Bold) }
+                        if (enabled && shizuku && !overlay) Button(onClick = openOverlay, shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Violet), modifier = Modifier.fillMaxWidth()) { Text("Üstte göstermeyi etkinleştir", color = Ink, fontWeight = FontWeight.Bold) }
                     }
                 }
             } else Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = Panel), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(22.dp)) { Text("Hazır", color = Blue, fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(6.dp)); Text("Uygulamalarım sekmesinden bir uygulama seçerek başlayın.", color = Color(0xFFBFC4D2), fontSize = 13.sp) } }
+            if (!enabled || !shizuku || !overlay) {
+                Spacer(Modifier.height(18.dp)); Text("Zorunlu izinler", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                if (!enabled) PermissionCard("01", "Erişilebilirlik", "Dokunma hareketleri için gereklidir.", false, openAccessibility)
+                if (!shizuku) PermissionCard("02", "Shizuku", "Sistem erişimi için gereklidir.", false, openShizuku)
+                if (!overlay) PermissionCard("03", "Diğer uygulamaların üzerinde göster", "Oyun üzerindeki panel için gereklidir.", false, openOverlay)
+            }
             Spacer(Modifier.height(18.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                 MetricCard("01", "Aktif profil", Modifier.weight(1f))
