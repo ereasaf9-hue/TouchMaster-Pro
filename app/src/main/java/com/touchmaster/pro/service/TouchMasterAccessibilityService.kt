@@ -256,6 +256,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
+                    if (!panelAttached) return@setOnTouchListener true
                     val dx = event.rawX.roundToInt() - down[0]
                     val dy = event.rawY.roundToInt() - down[1]
                     val slop = ViewConfiguration.get(this).scaledTouchSlop
@@ -270,6 +271,10 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
+                    if (!panelAttached) {
+                        target.performClick()
+                        return@setOnTouchListener true
+                    }
                     if (moved) {
                         bubbleXFraction = params.x.toFloat() / (resources.displayMetrics.widthPixels - size).coerceAtLeast(1)
                         bubbleYFraction = params.y.toFloat() / (resources.displayMetrics.heightPixels - size).coerceAtLeast(1)
@@ -415,7 +420,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         targetRow.addView(targetInfo, LinearLayout.LayoutParams(0, dp(42), 1f))
         targetRow.addView(actionText("+ HEDEF EKLE", 116, 40, ACCENT_DARK) { addTarget() })
         content.addView(targetRow)
-        content.addView(label("İşaretçiyi uzun basılı tutarak kaldırabilirsiniz.", 11, MUTED))
+        content.addView(label("Menü açıkken işaretçiyi sürükleyin; uzun basılı tutarak tek tıklayın.", 11, MUTED))
 
         content.addView(sectionTitle("TIKLAMA DAVRANIŞI"))
         intervalText = label("", 12, WHITE, bold = true)
@@ -557,7 +562,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                 background = rounded(ACCENT, 100)
                 elevation = dp(8).toFloat()
                 alpha = markerAlpha
-                contentDescription = "Hedef ${index + 1}. Sürükleyin; kaldırmak için uzun basın."
+                contentDescription = "Hedef ${index + 1}. Menü açıkken sürükleyin; tek tıklamak için uzun basın."
                 isClickable = true
                 setOnClickListener { setStatus("Hedef seçildi · sürükleyerek konumlandırın", ACCENT) }
             }
@@ -579,7 +584,12 @@ class TouchMasterAccessibilityService : AccessibilityService() {
             var markerMoved = false
             var downRawX = 0f
             var downRawY = 0f
-            val longPressRunnable = Runnable { longPressHandled = true; removeTarget(index) }
+            val longPressRunnable = Runnable {
+                if (!markerMoved && index in activePoints.indices) {
+                    longPressHandled = true
+                    clickTarget(index)
+                }
+            }
             pendingMarkerLongPresses += longPressRunnable
             marker.setOnTouchListener { view, event ->
                 when (event.actionMasked) {
@@ -592,6 +602,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                         true
                     }
                     MotionEvent.ACTION_MOVE -> {
+                        if (!panelAttached) return@setOnTouchListener true
                         val slop = ViewConfiguration.get(this).scaledTouchSlop
                         if (kotlin.math.abs(event.rawX - downRawX) > slop || kotlin.math.abs(event.rawY - downRawY) > slop) {
                             markerMoved = true
@@ -637,6 +648,15 @@ class TouchMasterAccessibilityService : AccessibilityService() {
             } catch (_: RuntimeException) {
                 Toast.makeText(this, "Hedef işaretçisi gösterilemedi. Ekran üstü iznini kontrol edin.", Toast.LENGTH_LONG).show()
             }
+        }
+    }
+
+    private fun clickTarget(index: Int) {
+        val point = activePoints.getOrNull(index) ?: return
+        val width = resources.displayMetrics.widthPixels.coerceAtLeast(1)
+        val height = resources.displayMetrics.heightPixels.coerceAtLeast(1)
+        serviceScope.launch {
+            executor.tap(listOf(point), width, height, activeSettings.pressMs)
         }
     }
 
