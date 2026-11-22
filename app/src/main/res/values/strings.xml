@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">TouchMaster Pro</string>
+    <string name="accessibility_service_description">TouchMaster Pro, yalnızca siz başlattığınızda dokunma hareketleri gönderir. Ekran içeriğini okumaz.</string>
+    <string name="accessibility_service_summary">Kullanıcının başlattığı dokunma hareketleri için erişilebilirlik hizmeti.</string>
+</resources>
