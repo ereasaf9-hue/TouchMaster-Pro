@@ -2,7 +2,7 @@
 
 Android için Kotlin ve Jetpack Compose ile geliştirilen dokunma otomasyonu prototipi. Paket adı `com.touchmaster.pro`, minimum Android 8.0 (API 26).
 
-Kaynak kodundaki sürüm **1.1.4**'tür.
+Kaynak kodundaki sürüm **1.1.5**'tir.
 
 ## Özellikler
 
@@ -16,7 +16,7 @@ Kaynak kodundaki sürüm **1.1.4**'tür.
 - Saf Kotlin makro parser/validator: CLICK, PRESS, SWIPE, DELAY, LOOP, LOOP_FOREVER, END_LOOP ve STOP_MACRO komutları.
 - Koordinat doğrulama/normalizasyon yardımcıları ve birim testler.
 
-Hedef uygulama dışındaki bir pencere algılanınca çalışan tıklama duraklatılır, panel ve hedef işaretçileri gizlenir; yuvarlak balon oturum kapanana kadar kalır. Hedef uygulamaya dönünce işaretçiler tekrar gösterilir. Sistem izin/kurulum pencerelerinde balon da geçici gizlenir ve hedef uygulamaya dönünce geri gelir. Oturumu kapatmak için balondan menüyü açıp × düğmesine basın. Ayarlar uygulama başına saklanır.
+Hedef uygulama dışındaki bir pencere algılanınca çalışan tıklama duraklatılır, hedef işaretçileri gizlenir ve kullanıcı tarafından açık bırakılmış ayar menüsü kapatılmaz. Menü kapalıyken bilinen sistem izin/kurulum pencerelerinde balon geçici gizlenir; hedef uygulamaya dönünce geri gelir. Oturumu kapatmak için balondan menüyü açıp × düğmesine basın. Ayarlar uygulama başına saklanır.
 
 ## Kapsam sınırları
 
@@ -40,6 +40,7 @@ Shizuku Binder bağlantısı Ayarlar'da isteğe bağlı olarak kullanılabilir; 
 
 ## Sürüm notları
 
+- [v1.1.5 düzeltme notları](RELEASE_NOTES_v1.1.5.md)
 - [v1.1.4 yayın notları](RELEASE_NOTES_v1.1.4.md)
 - [v1.1.3 yayın notları](RELEASE_NOTES_v1.1.3.md)
 - [v1.1.2 yayın notları](RELEASE_NOTES_v1.1.2.md)

@@ -158,18 +158,17 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         } else if (TargetSessionTransitionPolicy.shouldPauseClicker(targetWasForeground, targetPackage, foreground)) {
             // Never let a running clicker continue against an unexpected foreground app.
             if (::clicker.isInitialized && clicker.state.value == EngineState.RUNNING) clicker.pause()
-            if (foreground in transientSystemPackages) {
-                hideSettingsPanel()
+            if (TargetSessionTransitionPolicy.shouldTemporarilyHideBubble(
+                    panelOpen = panelAttached,
+                    isTransientSystemWindow = foreground in transientSystemPackages,
+                )
+            ) {
                 bubble?.let { view -> try { windowManager.removeView(view) } catch (_: RuntimeException) { } }
                 bubble = null
                 bubbleParams = null
-                removeMarkers()
-            } else {
-                // Window-state events can name an overlay/launcher rather than the selected app.
-                // Preserve the session and bubble; only the selected app can run the clicker.
-                hideSettingsPanel()
-                removeMarkers()
             }
+            // Do not dismiss a menu the user explicitly opened; markers are target-specific.
+            removeMarkers()
         }
     }
 

@@ -25,4 +25,15 @@ class TargetSessionTransitionPolicyTest {
         assertFalse(TargetSessionTransitionPolicy.shouldPauseClicker(true, null, "launcher.package"))
         assertFalse(TargetSessionTransitionPolicy.shouldPauseClicker(true, "game.package", null))
     }
+
+    @Test
+    fun preservesBubbleWhenMenuIsOpenDuringSystemWindowEvent() {
+        assertFalse(TargetSessionTransitionPolicy.shouldTemporarilyHideBubble(panelOpen = true, isTransientSystemWindow = true))
+    }
+
+    @Test
+    fun hidesBubbleOnSystemWindowOnlyWhenMenuIsClosed() {
+        assertTrue(TargetSessionTransitionPolicy.shouldTemporarilyHideBubble(panelOpen = false, isTransientSystemWindow = true))
+        assertFalse(TargetSessionTransitionPolicy.shouldTemporarilyHideBubble(panelOpen = false, isTransientSystemWindow = false))
+    }
 }
