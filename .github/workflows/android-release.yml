@@ -1,0 +1,97 @@
+name: Android Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Yayın sürümü (örn. 1.0.0)"
+        required: true
+        default: "1.0.0"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kaynak kodunu al
+        uses: actions/checkout@v4
+      - name: JDK 17 kur
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Android SDK kur
+        uses: android-actions/setup-android@v3
+      - name: Gradle önbelleğini ayarla
+        uses: gradle/actions/setup-gradle@v4
+      - name: Sürümü doğrula
+        id: version
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+          else
+            VERSION="$REQUESTED_VERSION"
+            VERSION="${VERSION#v}"
+            TAG="v${VERSION}"
+          fi
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Sürüm X.Y.Z biçiminde olmalı." >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - name: Release keystore’unu hazırla
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [[ -z "$KEYSTORE_BASE64" ]]; then
+            echo "İmzalı release için KEYSTORE_BASE64 GitHub Secret olarak eklenmeli." >&2
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/touchmaster-release.jks"
+          test -s "$RUNNER_TEMP/touchmaster-release.jks"
+          echo "KEYSTORE_PATH=$RUNNER_TEMP/touchmaster-release.jks" >> "$GITHUB_ENV"
+      - name: Testleri çalıştır ve APK’ları derle
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [[ -z "$KEYSTORE_PASSWORD" || -z "$KEY_ALIAS" || -z "$KEY_PASSWORD" ]]; then
+            echo "KEYSTORE_PASSWORD, KEY_ALIAS ve KEY_PASSWORD GitHub Secrets olarak eklenmeli." >&2
+            exit 1
+          fi
+          ./gradlew clean testDebugUnitTest lintDebug assembleDebug assembleRelease -PappVersionName="${{ steps.version.outputs.version }}"
+      - name: APK’ları kontrol et, adlandır ve hash oluştur
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEBUG="app/build/outputs/apk/debug/app-debug.apk"
+          RELEASE="app/build/outputs/apk/release/app-release.apk"
+          test -s "$DEBUG"
+          test -s "$RELEASE"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$DEBUG"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$RELEASE"
+          cp "$DEBUG" "TouchMaster-Pro-${{ steps.version.outputs.tag }}-debug.apk"
+          cp "$RELEASE" "TouchMaster-Pro-${{ steps.version.outputs.tag }}.apk"
+          sha256sum "TouchMaster-Pro-${{ steps.version.outputs.tag }}.apk" "TouchMaster-Pro-${{ steps.version.outputs.tag }}-debug.apk" > SHA256SUMS.txt
+      - name: GitHub Release oluştur ve APK’ları ekle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            "TouchMaster-Pro-${{ steps.version.outputs.tag }}.apk" \
+            "TouchMaster-Pro-${{ steps.version.outputs.tag }}-debug.apk" \
+            SHA256SUMS.txt \
+            --title "TouchMaster Pro ${{ steps.version.outputs.tag }}" \
+            --notes "Android 8.0+ (API 26+) için TouchMaster Pro. Gereken izin: kullanıcı tarafından etkinleştirilen erişilebilirlik gesture servisi. Bilinen kapsam: bu MVP’de Room/makro kalıcılığı, overlay, multi-touch, kayıt, foreground service, Shizuku ve gerçek cihaz uyumluluk testi yoktur. Android gesture zamanlaması cihaz ve uygulamaya göre değişir. Release APK imzalı olarak eklenmiştir; SHA-256 dosyası varlıklardadır."

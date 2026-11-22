@@ -1,0 +1,23 @@
+<resources>
+    <string name="app_name">TouchMaster Pro</string>
+    <string name="accessibility_service_name">TouchMaster dokunma servisi</string>
+    <string name="accessibility_service_description">Yalnızca sizin açıkça başlattığınız dokunma otomasyonlarını uygulamak için gesture izni gerekir. Ekran içeriği okunmaz veya gönderilmez.</string>
+    <string name="app_tagline">Dokunma araçları, sizin kontrolünüzde</string>
+    <string name="tab_home">Ana Sayfa</string>
+    <string name="tab_macros">Makrolar</string>
+    <string name="tab_tools">Araçlar</string>
+    <string name="tab_settings">Ayarlar</string>
+    <string name="start">Başlat</string>
+    <string name="stop">Durdur</string>
+    <string name="accessibility_required">Erişilebilirlik servisi kapalı. Otomasyon için bunu Ayarlar’dan etkinleştirin.</string>
+    <string name="privacy_notice">Gizlilik: Uygulama ekran içeriğini, şifreleri veya yazılan metni okumaz. Otomasyon yalnızca siz başlattığınızda çalışır.</string>
+    <string name="x_coordinate">X koordinatı</string>
+    <string name="y_coordinate">Y koordinatı</string>
+    <string name="interval_ms">Aralık (ms)</string>
+    <string name="click_count">Tıklama sayısı</string>
+    <string name="macro_editor">Makro düzenleyici</string>
+    <string name="macro_hint">Örn. CLICK 500 900&#10;DELAY 300&#10;LOOP 3&#10;CLICK 500 900&#10;END_LOOP</string>
+    <string name="save_macro">Makroyu doğrula</string>
+    <string name="settings_title">Ayarlar</string>
+    <string name="diagnostics_unavailable">Tanılama: gerçek cihaz kapasitesi, servis bağlandıktan sonra okunabilir.</string>
+</resources>

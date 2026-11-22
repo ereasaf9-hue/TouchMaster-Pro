@@ -1,0 +1,2 @@
+-keepattributes *Annotation*, EnclosingMethod, InnerClasses
+-keep class androidx.room.** { *; }
