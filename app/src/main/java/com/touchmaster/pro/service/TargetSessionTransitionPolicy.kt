@@ -1,14 +1,13 @@
 package com.touchmaster.pro.service
 
-/** Pure timing policy for ignoring noisy package events immediately after the target app opens. */
+/** Pure policy for pausing click automation when a foreground event leaves the selected target. */
 internal object TargetSessionTransitionPolicy {
-    fun isWithinStartupGrace(
-        firstTargetForegroundAtElapsedMs: Long?,
-        nowElapsedMs: Long,
-        gracePeriodMs: Long,
-    ): Boolean {
-        val firstForegroundAt = firstTargetForegroundAtElapsedMs ?: return false
-        if (gracePeriodMs <= 0L || nowElapsedMs < firstForegroundAt) return false
-        return nowElapsedMs - firstForegroundAt < gracePeriodMs
-    }
+    fun shouldPauseClicker(
+        targetWasForeground: Boolean,
+        targetPackage: String?,
+        foregroundPackage: String?,
+    ): Boolean = targetWasForeground &&
+        targetPackage != null &&
+        foregroundPackage != null &&
+        foregroundPackage != targetPackage
 }

@@ -9,7 +9,6 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -47,9 +46,6 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         var instance: TouchMasterAccessibilityService? = null
 
         private const val PANEL_WIDTH_DP = 340
-        // Window-state events can briefly report a different package while an app is opening.
-        private const val TARGET_STARTUP_TRANSITION_GRACE_MS = 10_000L
-        private const val TARGET_EXIT_GRACE_MS = 5_000L
         private const val MIN_INTERVAL_MS = 50L
         private const val MAX_INTERVAL_MS = 5_000L
         private const val MIN_PRESS_MS = 10L
@@ -94,9 +90,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     private var activeSettings = ClickerSettings()
     private var targetPackage: String? = null
     private var targetLabel: String = "Uygulama"
-    private var lastForegroundPackage: String? = null
     private var targetWasForeground = false
-    private var targetFirstForegroundAtElapsedMs: Long? = null
 
     private val transientSystemPackages = setOf(
         "com.android.systemui",
@@ -116,10 +110,6 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     private var panelAlpha = 0.97f
     private var panelXFraction = 0.04f
     private var panelYFraction = 0.12f
-
-    private val leaveTargetRunnable = Runnable {
-        if (targetPackage != null && lastForegroundPackage != targetPackage) removePanel()
-    }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -155,45 +145,30 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val foreground = event.packageName?.toString() ?: return
-        lastForegroundPackage = foreground
         if (foreground == targetPackage) {
             targetWasForeground = true
-            if (targetFirstForegroundAtElapsedMs == null) {
-                targetFirstForegroundAtElapsedMs = SystemClock.elapsedRealtime()
-            }
-            mainHandler.removeCallbacks(leaveTargetRunnable)
             if (bubble == null) {
                 try {
                     createBubble()
-                    renderMarkers()
                 } catch (_: RuntimeException) {
                     removePanel()
                 }
             }
-        } else if (targetWasForeground) {
+            if (bubble != null && markerViews.isEmpty() && activePoints.isNotEmpty()) renderMarkers()
+        } else if (TargetSessionTransitionPolicy.shouldPauseClicker(targetWasForeground, targetPackage, foreground)) {
             // Never let a running clicker continue against an unexpected foreground app.
             if (::clicker.isInitialized && clicker.state.value == EngineState.RUNNING) clicker.pause()
-            val isStartupWindowTransition = foreground !in transientSystemPackages &&
-                TargetSessionTransitionPolicy.isWithinStartupGrace(
-                    targetFirstForegroundAtElapsedMs,
-                    SystemClock.elapsedRealtime(),
-                    TARGET_STARTUP_TRANSITION_GRACE_MS,
-                )
-            if (isStartupWindowTransition) {
-                // Keep the session through launcher/activity transition noise common to app launch.
-                mainHandler.removeCallbacks(leaveTargetRunnable)
-                return
-            }
             if (foreground in transientSystemPackages) {
-                mainHandler.removeCallbacks(leaveTargetRunnable)
                 hideSettingsPanel()
                 bubble?.let { view -> try { windowManager.removeView(view) } catch (_: RuntimeException) { } }
                 bubble = null
                 bubbleParams = null
                 removeMarkers()
             } else {
-                mainHandler.removeCallbacks(leaveTargetRunnable)
-                mainHandler.postDelayed(leaveTargetRunnable, TARGET_EXIT_GRACE_MS)
+                // Window-state events can name an overlay/launcher rather than the selected app.
+                // Preserve the session and bubble; only the selected app can run the clicker.
+                hideSettingsPanel()
+                removeMarkers()
             }
         }
     }
@@ -214,9 +189,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         removePanel()
         this.targetPackage = targetPackage
         this.targetLabel = targetLabel
-        lastForegroundPackage = null
         targetWasForeground = false
-        targetFirstForegroundAtElapsedMs = null
         activeSettings = settings
         activePoints.clear()
         loadProfile(targetPackage, points, settings)
@@ -745,7 +718,6 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     }
 
     fun removePanel() {
-        mainHandler.removeCallbacks(leaveTargetRunnable)
         if (::clicker.isInitialized) clicker.stop()
         removeMarkers()
         bubble?.let { view -> try { windowManager.removeView(view) } catch (_: RuntimeException) { } }
@@ -763,9 +735,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         runButton = null
         activePoints.clear()
         targetPackage = null
-        lastForegroundPackage = null
         targetWasForeground = false
-        targetFirstForegroundAtElapsedMs = null
     }
 
     private fun updateBubbleLayout() {

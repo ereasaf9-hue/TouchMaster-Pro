@@ -6,20 +6,23 @@ import org.junit.Test
 
 class TargetSessionTransitionPolicyTest {
     @Test
-    fun ignoresNonTargetEventsInsideStartupGrace() {
-        assertTrue(TargetSessionTransitionPolicy.isWithinStartupGrace(1_000L, 9_999L, 10_000L))
+    fun pausesAfterTargetIsSeenAndForegroundMovesElsewhere() {
+        assertTrue(TargetSessionTransitionPolicy.shouldPauseClicker(true, "game.package", "launcher.package"))
     }
 
     @Test
-    fun doesNotIgnoreAtOrAfterGraceBoundary() {
-        assertFalse(TargetSessionTransitionPolicy.isWithinStartupGrace(1_000L, 11_000L, 10_000L))
-        assertFalse(TargetSessionTransitionPolicy.isWithinStartupGrace(1_000L, 11_001L, 10_000L))
+    fun doesNotPauseWhileTargetRemainsForeground() {
+        assertFalse(TargetSessionTransitionPolicy.shouldPauseClicker(true, "game.package", "game.package"))
     }
 
     @Test
-    fun missingStartOrInvalidClockDoesNotEnterGrace() {
-        assertFalse(TargetSessionTransitionPolicy.isWithinStartupGrace(null, 1_000L, 10_000L))
-        assertFalse(TargetSessionTransitionPolicy.isWithinStartupGrace(2_000L, 1_000L, 10_000L))
-        assertFalse(TargetSessionTransitionPolicy.isWithinStartupGrace(1_000L, 1_000L, 0L))
+    fun doesNotPauseBeforeTargetHasBeenForeground() {
+        assertFalse(TargetSessionTransitionPolicy.shouldPauseClicker(false, "game.package", "launcher.package"))
+    }
+
+    @Test
+    fun missingPackageNamesDoNotTriggerPausePolicy() {
+        assertFalse(TargetSessionTransitionPolicy.shouldPauseClicker(true, null, "launcher.package"))
+        assertFalse(TargetSessionTransitionPolicy.shouldPauseClicker(true, "game.package", null))
     }
 }
