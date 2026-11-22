@@ -29,6 +29,7 @@ import com.touchmaster.pro.engine.AccessibilityGestureExecutor
 import com.touchmaster.pro.engine.ClickerEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -70,6 +71,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var windowManager: WindowManager
+    private var stateCollectorJob: Job? = null
 
     private var bubble: View? = null
     private var bubbleParams: WindowManager.LayoutParams? = null
@@ -85,10 +87,21 @@ class TouchMasterAccessibilityService : AccessibilityService() {
 
     private val activePoints = mutableListOf<PointEntry>()
     private val markerViews = mutableListOf<View>()
+    private val pendingMarkerLongPresses = mutableListOf<Runnable>()
     private var activeSettings = ClickerSettings()
     private var targetPackage: String? = null
     private var targetLabel: String = "Uygulama"
     private var lastForegroundPackage: String? = null
+    private var targetWasForeground = false
+
+    private val transientSystemPackages = setOf(
+        "com.android.systemui",
+        "com.android.permissioncontroller",
+        "com.google.android.permissioncontroller",
+        "com.android.packageinstaller",
+        "com.google.android.packageinstaller",
+        "com.android.intentresolver",
+    )
 
     private var bubbleAlpha = 0.96f
     private var bubbleSizeDp = 58
@@ -111,11 +124,14 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         connected.value = true
         executor = AccessibilityGestureExecutor(this)
         clicker = ClickerEngine(executor)
-        serviceScope.launch { clicker.state.collect { state -> updateRunState(state) } }
+        stateCollectorJob?.cancel()
+        stateCollectorJob = serviceScope.launch { clicker.state.collect { state -> updateRunState(state) } }
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         connected.value = false
+        stateCollectorJob?.cancel()
+        stateCollectorJob = null
         if (::clicker.isInitialized) clicker.stop()
         removePanel()
         instance = null
@@ -123,6 +139,8 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        stateCollectorJob?.cancel()
+        stateCollectorJob = null
         removePanel()
         connected.value = false
         serviceScope.cancel()
@@ -133,13 +151,31 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val foreground = event.packageName?.toString() ?: return
-        val previousForeground = lastForegroundPackage
         lastForegroundPackage = foreground
         if (foreground == targetPackage) {
+            targetWasForeground = true
             mainHandler.removeCallbacks(leaveTargetRunnable)
-        } else if (previousForeground == targetPackage) {
-            mainHandler.removeCallbacks(leaveTargetRunnable)
-            mainHandler.postDelayed(leaveTargetRunnable, TARGET_EXIT_GRACE_MS)
+            if (bubble == null) {
+                try {
+                    createBubble()
+                    renderMarkers()
+                } catch (_: RuntimeException) {
+                    removePanel()
+                }
+            }
+        } else if (targetWasForeground) {
+            if (foreground in transientSystemPackages) {
+                mainHandler.removeCallbacks(leaveTargetRunnable)
+                if (::clicker.isInitialized && clicker.state.value == EngineState.RUNNING) clicker.pause()
+                hideSettingsPanel()
+                bubble?.let { view -> try { windowManager.removeView(view) } catch (_: RuntimeException) { } }
+                bubble = null
+                bubbleParams = null
+                removeMarkers()
+            } else {
+                mainHandler.removeCallbacks(leaveTargetRunnable)
+                mainHandler.postDelayed(leaveTargetRunnable, TARGET_EXIT_GRACE_MS)
+            }
         }
     }
 
@@ -160,6 +196,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         this.targetPackage = targetPackage
         this.targetLabel = targetLabel
         lastForegroundPackage = null
+        targetWasForeground = false
         activeSettings = settings
         activePoints.clear()
         loadProfile(targetPackage, points, settings)
@@ -266,18 +303,22 @@ class TouchMasterAccessibilityService : AccessibilityService() {
             panel = root
             buildPanel(root)
             val metrics = resources.displayMetrics
-            val width = minOf(dp(PANEL_WIDTH_DP), (metrics.widthPixels - dp(16)).coerceAtLeast(dp(180)))
-            val height = minOf(dp(620), (metrics.heightPixels - dp(100)).coerceAtLeast(dp(200)))
+            val width = minOf(dp(PANEL_WIDTH_DP), metrics.widthPixels.coerceAtLeast(1))
+            val height = minOf(dp(620), metrics.heightPixels.coerceAtLeast(1))
             panelParams = WindowManager.LayoutParams(
                 width,
                 height,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT,
             ).apply {
                 gravity = Gravity.TOP or Gravity.END
                 x = (panelXFraction * (metrics.widthPixels - width).coerceAtLeast(0)).roundToInt()
-                y = (panelYFraction * (metrics.heightPixels - height).coerceAtLeast(dp(24))).roundToInt().coerceAtLeast(dp(24))
+                val maxY = (metrics.heightPixels - height).coerceAtLeast(0)
+                val minY = dp(24).coerceAtMost(maxY)
+                y = (panelYFraction * maxY).roundToInt().coerceIn(minY, maxY)
             }
         }
         val view = panel ?: return
@@ -333,9 +374,10 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                     if (kotlin.math.abs(dx) > slop || kotlin.math.abs(dy) > slop) moved = true
                     val metrics = resources.displayMetrics
                     val maxX = (metrics.widthPixels - params.width).coerceAtLeast(0)
-                    val maxY = (metrics.heightPixels - params.height).coerceAtLeast(dp(24))
+                    val maxY = (metrics.heightPixels - params.height).coerceAtLeast(0)
+                    val minY = dp(24).coerceAtMost(maxY)
                     params.x = (origin[0] - dx).coerceIn(0, maxX)
-                    params.y = (origin[1] + dy).coerceIn(dp(24), maxY)
+                    params.y = (origin[1] + dy).coerceIn(minY, maxY)
                     updatePanelLayout()
                     true
                 }
@@ -381,6 +423,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         content.addView(sectionTitle("TIKLAMA DAVRANIŞI"))
         intervalText = label("", 12, WHITE, bold = true)
         content.addView(stepperRow("Tıklama aralığı", intervalText!!, "−", "＋", { changeInterval(-50) }, { changeInterval(50) }))
+        content.addView(label("Çoklu hedeflerde gerçek aralık, bir turun tamamlanma süresinden kısa olmaz.", 10, MUTED))
         pressText = label("", 12, WHITE, bold = true)
         content.addView(stepperRow("Basılı tutma süresi", pressText!!, "−", "＋", { changePress(-10) }, { changePress(10) }))
         repeatText = label("", 12, WHITE, bold = true)
@@ -415,9 +458,11 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         content.addView(label("Balonu taşımak için balonu, menüyü taşımak için üst başlığı sürükleyin.", 11, MUTED))
 
         val controls = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        runButton = actionText("▶  Başlat", 0, 48, ACCENT_DARK) { toggleRun() }.apply { gravity = Gravity.CENTER }
+        val compact = isCompactWidth()
+        runButton = actionText(if (compact) "Başlat" else "▶  Başlat", 0, 48, ACCENT_DARK) { toggleRun() }.apply { gravity = Gravity.CENTER }
         controls.addView(runButton, LinearLayout.LayoutParams(0, dp(48), 1f))
-        controls.addView(actionText("■  Durdur", 96, 48, STOP_DARK) { stopRun() }, marginParams(96, 48, start = 8))
+        val stopWidth = if (compact) 78 else 96
+        controls.addView(actionText(if (compact) "Durdur" else "■  Durdur", stopWidth, 48, STOP_DARK) { stopRun() }, marginParams(stopWidth, 48, start = if (compact) 6 else 8))
         content.addView(spacer(12))
         content.addView(controls)
     }
@@ -435,11 +480,14 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         onPlus: () -> Unit,
     ): LinearLayout {
         val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        val compact = isCompactWidth()
+        val buttonWidth = if (compact) 30 else 36
+        val valueWidth = if (compact) 60 else 82
         row.addView(label(title, 13, WHITE), LinearLayout.LayoutParams(0, dp(42), 1f))
-        row.addView(actionText(minus, 36, 34, PANEL_BUTTON, onMinus))
+        row.addView(actionText(minus, buttonWidth, 34, PANEL_BUTTON, onMinus))
         value.gravity = Gravity.CENTER
-        row.addView(value, LinearLayout.LayoutParams(dp(82), dp(38)))
-        row.addView(actionText(plus, 36, 34, PANEL_BUTTON, onPlus))
+        row.addView(value, LinearLayout.LayoutParams(dp(valueWidth), dp(38)))
+        row.addView(actionText(plus, buttonWidth, 34, PANEL_BUTTON, onPlus))
         return row
     }
 
@@ -480,6 +528,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         val id = (activePoints.maxOfOrNull { it.id } ?: 0L) + 1L
         activePoints += PointEntry(id, 0.5f, 0.5f, id.toString())
         renderMarkers()
+        syncRunningConfiguration()
         updatePanelContent()
         saveProfile()
         Toast.makeText(this, "Hedef eklendi. Numaralı daireyi istediğiniz noktaya sürükleyin.", Toast.LENGTH_SHORT).show()
@@ -490,6 +539,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         val label = activePoints[index].label.ifBlank { (index + 1).toString() }
         activePoints.removeAt(index)
         renderMarkers()
+        syncRunningConfiguration()
         updatePanelContent()
         saveProfile()
         Toast.makeText(this, "Hedef $label kaldırıldı.", Toast.LENGTH_SHORT).show()
@@ -533,6 +583,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
             var downRawX = 0f
             var downRawY = 0f
             val longPressRunnable = Runnable { longPressHandled = true; removeTarget(index) }
+            pendingMarkerLongPresses += longPressRunnable
             marker.setOnTouchListener { view, event ->
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
@@ -548,6 +599,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                         if (kotlin.math.abs(event.rawX - downRawX) > slop || kotlin.math.abs(event.rawY - downRawY) > slop) {
                             markerMoved = true
                             mainHandler.removeCallbacks(longPressRunnable)
+                            pendingMarkerLongPresses.remove(longPressRunnable)
                         }
                         if (longPressHandled) return@setOnTouchListener true
                         params.x = (event.rawX - size / 2f).roundToInt().coerceIn(0, (metrics.widthPixels - size).coerceAtLeast(0))
@@ -565,12 +617,20 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                     }
                     MotionEvent.ACTION_UP -> {
                         mainHandler.removeCallbacks(longPressRunnable)
+                        pendingMarkerLongPresses.remove(longPressRunnable)
                         if (!longPressHandled && !markerMoved) view.performClick()
-                        if (markerMoved) saveProfile()
+                        if (markerMoved) {
+                            saveProfile()
+                            syncRunningConfiguration()
+                        }
                         updatePanelContent()
                         true
                     }
-                    MotionEvent.ACTION_CANCEL -> { mainHandler.removeCallbacks(longPressRunnable); true }
+                    MotionEvent.ACTION_CANCEL -> {
+                        mainHandler.removeCallbacks(longPressRunnable)
+                        pendingMarkerLongPresses.remove(longPressRunnable)
+                        true
+                    }
                     else -> true
                 }
             }
@@ -584,6 +644,8 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     }
 
     private fun removeMarkers() {
+        pendingMarkerLongPresses.forEach { mainHandler.removeCallbacks(it) }
+        pendingMarkerLongPresses.clear()
         markerViews.forEach { marker -> try { windowManager.removeView(marker) } catch (_: RuntimeException) { } }
         markerViews.clear()
     }
@@ -608,14 +670,27 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         updateRunState(EngineState.OFF)
     }
 
+    private fun syncRunningConfiguration() {
+        if (!::clicker.isInitialized || clicker.state.value != EngineState.RUNNING) return
+        if (activePoints.isEmpty()) {
+            clicker.stop()
+            return
+        }
+        val width = resources.displayMetrics.widthPixels.coerceAtLeast(1)
+        val height = resources.displayMetrics.heightPixels.coerceAtLeast(1)
+        clicker.updateConfiguration(activePoints.toList(), activeSettings, width, height)
+    }
+
     private fun changeInterval(delta: Long) {
         activeSettings = activeSettings.copy(intervalMs = (activeSettings.intervalMs + delta).coerceIn(MIN_INTERVAL_MS, MAX_INTERVAL_MS))
+        syncRunningConfiguration()
         saveProfile()
         updatePanelContent()
     }
 
     private fun changePress(delta: Long) {
         activeSettings = activeSettings.copy(pressMs = (activeSettings.pressMs + delta).coerceIn(MIN_PRESS_MS, MAX_PRESS_MS))
+        syncRunningConfiguration()
         saveProfile()
         updatePanelContent()
     }
@@ -623,6 +698,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     private fun changeRepeats(delta: Int) {
         val next = (activeSettings.repetitions + delta).coerceIn(0, 100_000)
         activeSettings = activeSettings.copy(repetitions = next)
+        syncRunningConfiguration()
         saveProfile()
         updatePanelContent()
     }
@@ -630,12 +706,12 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     private fun updateRunState(state: EngineState) {
         if (panel == null) return
         when (state) {
-            EngineState.RUNNING -> { setStatus("ÇALIŞIYOR · Dokununca duraklatılır", ACCENT); runButton?.text = "Ⅱ  Duraklat" }
-            EngineState.PAUSED -> { setStatus("DURAKLATILDI · Devam etmek için dokunun", WARNING); runButton?.text = "▶  Devam et" }
-            EngineState.ERROR -> { setStatus("HATA · Erişilebilirlik servisini kontrol edin", ERROR); runButton?.text = "▶  Yeniden dene" }
+            EngineState.RUNNING -> { setStatus("ÇALIŞIYOR · Dokununca duraklatılır", ACCENT); runButton?.text = if (isCompactWidth()) "Duraklat" else "Ⅱ  Duraklat" }
+            EngineState.PAUSED -> { setStatus("DURAKLATILDI · Devam etmek için dokunun", WARNING); runButton?.text = if (isCompactWidth()) "Devam et" else "▶  Devam et" }
+            EngineState.ERROR -> { setStatus("HATA · Erişilebilirlik servisini kontrol edin", ERROR); runButton?.text = if (isCompactWidth()) "Yeniden dene" else "▶  Yeniden dene" }
             else -> {
                 setStatus(if (activePoints.isEmpty()) "HAZIR · Bir hedef ekleyin" else "HAZIR · Başlatmaya hazır", ACCENT)
-                runButton?.text = "▶  Başlat"
+                runButton?.text = if (isCompactWidth()) "Başlat" else "▶  Başlat"
             }
         }
     }
@@ -668,6 +744,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         activePoints.clear()
         targetPackage = null
         lastForegroundPackage = null
+        targetWasForeground = false
     }
 
     private fun updateBubbleLayout() {
@@ -699,6 +776,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     }
 
     private fun loadProfile(packageName: String, fallbackPoints: List<PointEntry>, defaults: ClickerSettings) {
+        resetVisualProfileDefaults()
         val stored = getSharedPreferences(PROFILE_PREFS, Context.MODE_PRIVATE).getString("profile:$packageName", null)
         if (stored == null) {
             activePoints.clear()
@@ -735,10 +813,23 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                 )
             }
         } catch (_: Exception) {
+            resetVisualProfileDefaults()
             activePoints.clear()
             activePoints.addAll(fallbackPoints)
             activeSettings = defaults
         }
+    }
+
+    private fun resetVisualProfileDefaults() {
+        bubbleAlpha = 0.96f
+        bubbleSizeDp = 58
+        bubbleXFraction = 0.94f
+        bubbleYFraction = 0.26f
+        markerAlpha = 0.86f
+        markerSizeDp = 42
+        panelAlpha = 0.97f
+        panelXFraction = 0.04f
+        panelYFraction = 0.12f
     }
 
     private fun saveProfile() {
@@ -812,5 +903,6 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     private fun spacer(heightDp: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(heightDp)) }
     private fun marginParams(width: Int, height: Int, start: Int) = LinearLayout.LayoutParams(dp(width), dp(height)).apply { marginStart = dp(start) }
     private fun rounded(color: Int, radiusDp: Int) = GradientDrawable().apply { setColor(color); cornerRadius = dp(radiusDp).toFloat() }
+    private fun isCompactWidth() = resources.displayMetrics.widthPixels / resources.displayMetrics.density < 300f
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
 }

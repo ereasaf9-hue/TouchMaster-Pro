@@ -150,10 +150,6 @@ class MainActivity : ComponentActivity() {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             return
         }
-        if (!isShizukuGranted()) {
-            requestShizuku()
-            return
-        }
         if (!isOverlayGranted()) {
             Toast.makeText(this, "Kontrol paneli için ekran üstü gösterim izni gerekli.", Toast.LENGTH_LONG).show()
             requestOverlay()
@@ -195,7 +191,7 @@ class MainActivity : ComponentActivity() {
         Scaffold(containerColor = Ink, bottomBar = { BottomBar(tab) { tab = it } }) { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
                 when (tab) {
-                    0 -> HomeScreen(enabled, shizuku, overlay, { openAccessibilitySettings(); enabled = isAccessibilityEnabled() }, { requestShizuku(); shizuku = isShizukuGranted() }, { requestOverlay(); overlay = isOverlayGranted() })
+                    0 -> HomeScreen(enabled, shizuku, overlay, { openAccessibilitySettings(); enabled = isAccessibilityEnabled() }, { requestOverlay(); overlay = isOverlayGranted() })
                     1 -> AppsScreen(apps, ::launchApp)
                     2 -> ToolsScreen()
                     else -> SettingsScreen(enabled, shizuku, overlay, notifications, batteryOptimization, { openAccessibilitySettings(); enabled = isAccessibilityEnabled() }, { requestShizuku(); shizuku = isShizukuGranted() }, { requestOverlay(); overlay = isOverlayGranted() }, { requestNotifications(); notifications = isNotificationGranted() }, { requestBatteryOptimization(); batteryOptimization = isBatteryOptimizationDisabled() })
@@ -205,28 +201,26 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun HomeScreen(enabled: Boolean, shizuku: Boolean, overlay: Boolean, openAccessibility: () -> Unit, openShizuku: () -> Unit, openOverlay: () -> Unit) {
+    private fun HomeScreen(enabled: Boolean, shizuku: Boolean, overlay: Boolean, openAccessibility: () -> Unit, openOverlay: () -> Unit) {
         Column(Modifier.fillMaxSize().padding(horizontal = 22.dp)) {
             Header("TouchMaster", "PRO CONTROL")
             Text("Kontrol merkezi", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
             Text("Oyun ve uygulamalar için sade, görünür dokunma araçları.", color = Muted, fontSize = 14.sp)
             Spacer(Modifier.height(24.dp))
-            if (!enabled || !shizuku || !overlay) Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = Panel), modifier = Modifier.fillMaxWidth()) {
+            if (!enabled || !overlay) Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = Panel), modifier = Modifier.fillMaxWidth()) {
                 Box(Modifier.background(Brush.linearGradient(listOf(Color(0xFF25213C), Panel)))) {
                     Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(48.dp).clip(CircleShape).background(Violet.copy(alpha = .18f)), contentAlignment = Alignment.Center) { Text("✦", color = Violet, fontSize = 24.sp) }; Spacer(Modifier.width(14.dp)); Column { Text("Kurulum gerekiyor", color = Color.White, fontWeight = FontWeight.Medium); Text("Erişilebilirlik: ${if (enabled) "Açık" else "Kapalı"}", color = if (enabled) Blue else Color(0xFFFFB86B), fontSize = 13.sp); Text("Shizuku: ${if (shizuku) "Açık" else "Kapalı"}  •  Üstte göster: ${if (overlay) "Açık" else "Kapalı"}", color = Muted, fontSize = 12.sp) } }
+                        Row(verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(48.dp).clip(CircleShape).background(Violet.copy(alpha = .18f)), contentAlignment = Alignment.Center) { Text("✦", color = Violet, fontSize = 24.sp) }; Spacer(Modifier.width(14.dp)); Column { Text("Kurulum gerekiyor", color = Color.White, fontWeight = FontWeight.Medium); Text("Erişilebilirlik: ${if (enabled) "Açık" else "Kapalı"}", color = if (enabled) Blue else Color(0xFFFFB86B), fontSize = 13.sp); Text("Shizuku (isteğe bağlı): ${if (shizuku) "Açık" else "Kapalı"}  •  Üstte göster: ${if (overlay) "Açık" else "Kapalı"}", color = Muted, fontSize = 12.sp) } }
                         if (!enabled) Button(onClick = openAccessibility, shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Violet), modifier = Modifier.fillMaxWidth()) { Text("Erişilebilirliği etkinleştir", color = Ink, fontWeight = FontWeight.Bold) }
-                        if (enabled && !shizuku) Button(onClick = openShizuku, shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Violet), modifier = Modifier.fillMaxWidth()) { Text("Shizuku'yu etkinleştir", color = Ink, fontWeight = FontWeight.Bold) }
-                        if (enabled && shizuku && !overlay) Button(onClick = openOverlay, shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Violet), modifier = Modifier.fillMaxWidth()) { Text("Üstte göstermeyi etkinleştir", color = Ink, fontWeight = FontWeight.Bold) }
+                        if (enabled && !overlay) Button(onClick = openOverlay, shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Violet), modifier = Modifier.fillMaxWidth()) { Text("Üstte göstermeyi etkinleştir", color = Ink, fontWeight = FontWeight.Bold) }
                     }
                 }
             } else Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = Panel), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(22.dp)) { Text("Hazır", color = Blue, fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(6.dp)); Text("Uygulamalarım sekmesinden bir uygulama seçerek başlayın.", color = Color(0xFFBFC4D2), fontSize = 13.sp) } }
-            if (!enabled || !shizuku || !overlay) {
+            if (!enabled || !overlay) {
                 Spacer(Modifier.height(18.dp)); Text("Zorunlu izinler", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                 if (!enabled) PermissionCard("01", "Erişilebilirlik", "Dokunma hareketleri için gereklidir.", false, openAccessibility)
-                if (!shizuku) PermissionCard("02", "Shizuku", "Sistem erişimi için gereklidir.", false, openShizuku)
-                if (!overlay) PermissionCard("03", "Diğer uygulamaların üzerinde göster", "Oyun üzerindeki panel için gereklidir.", false, openOverlay)
+                if (!overlay) PermissionCard("02", "Diğer uygulamaların üzerinde göster", "Oyun üzerindeki panel için gereklidir.", false, openOverlay)
             }
             Spacer(Modifier.height(18.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
@@ -274,7 +268,7 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable private fun ToolsScreen() { SimpleSection("Araçlar", "TOOLS", listOf("Auto Clicker" to "Nokta bazlı otomasyon", "Multi Touch" to "Birden fazla hedef", "Swipe" to "Kaydırma hareketleri", "Makrolar" to "Adım adım komutlar")) }
-    @Composable private fun SettingsScreen(enabled: Boolean, shizuku: Boolean, overlay: Boolean, notifications: Boolean, batteryOptimization: Boolean, openSettings: () -> Unit, requestShizuku: () -> Unit, requestOverlay: () -> Unit, requestNotifications: () -> Unit, requestBatteryOptimization: () -> Unit) { Column(Modifier.fillMaxSize().padding(horizontal = 22.dp)) { Header("Ayarlar", "SETTINGS"); Text("İzinler", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold); Text("Her erişimi aşağıdaki ayrı düğmeden etkinleştirin.", color = Muted, fontSize = 13.sp); Spacer(Modifier.height(18.dp)); PermissionCard("01", "Erişilebilirlik", "Dokunma hareketlerini göndermek için gereklidir.", enabled, openSettings); PermissionCard("02", "Shizuku", "Gelişmiş sistem erişimi için Shizuku bağlantısı gerekir.", shizuku, requestShizuku); PermissionCard("03", "Diğer uygulamaların üzerinde göster", "Oyun üzerinde kontrol panelini göstermek için gereklidir.", overlay, requestOverlay); Spacer(Modifier.height(22.dp)); Text("İsteğe bağlı", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold); if (Build.VERSION.SDK_INT >= 33) PermissionCard("04", "Bildirimler", "Durum bildirimlerini göstermek için önerilir.", notifications, requestNotifications); PermissionCard("05", "Pil optimizasyonu", "Uzun kullanımda servisin durmaması için önerilir.", batteryOptimization, requestBatteryOptimization); Spacer(Modifier.height(18.dp)); Text("Görünüm", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold); SettingRow("Panel görünümü", "Koyu cam", null); SettingRow("Güvenlik", "Hedef uygulamadan çıkınca durdur", null) } }
+    @Composable private fun SettingsScreen(enabled: Boolean, shizuku: Boolean, overlay: Boolean, notifications: Boolean, batteryOptimization: Boolean, openSettings: () -> Unit, requestShizuku: () -> Unit, requestOverlay: () -> Unit, requestNotifications: () -> Unit, requestBatteryOptimization: () -> Unit) { Column(Modifier.fillMaxSize().padding(horizontal = 22.dp)) { Header("Ayarlar", "SETTINGS"); Text("İzinler", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold); Text("Her erişimi aşağıdaki ayrı düğmeden etkinleştirin.", color = Muted, fontSize = 13.sp); Spacer(Modifier.height(18.dp)); PermissionCard("01", "Erişilebilirlik", "Dokunma hareketlerini göndermek için gereklidir.", enabled, openSettings); PermissionCard("02", "Shizuku (isteğe bağlı)", "Gelişmiş sistem bağlantısı; bu sürümde tıklama için gerekmez.", shizuku, requestShizuku); PermissionCard("03", "Diğer uygulamaların üzerinde göster", "Oyun üzerinde kontrol panelini göstermek için gereklidir.", overlay, requestOverlay); Spacer(Modifier.height(22.dp)); Text("İsteğe bağlı", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold); if (Build.VERSION.SDK_INT >= 33) PermissionCard("04", "Bildirimler", "Durum bildirimlerini göstermek için önerilir.", notifications, requestNotifications); PermissionCard("05", "Pil optimizasyonu", "Uzun kullanımda sistemin servisi kısıtlamasını azaltabilir; durdurulmayacağını garanti etmez.", batteryOptimization, requestBatteryOptimization); Spacer(Modifier.height(18.dp)); Text("Görünüm", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold); SettingRow("Panel görünümü", "Koyu cam", null); SettingRow("Güvenlik", "Hedef uygulamadan çıkınca durdur", null) } }
     @Composable private fun PermissionCard(number: String, title: String, description: String, granted: Boolean, action: () -> Unit) { Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Panel), modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)) { Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(38.dp).clip(CircleShape).background(if (granted) Blue.copy(alpha = .18f) else Violet.copy(alpha = .18f)), contentAlignment = Alignment.Center) { Text(number, color = if (granted) Blue else Violet, fontSize = 12.sp, fontWeight = FontWeight.Bold) }; Spacer(Modifier.width(14.dp)); Column(Modifier.weight(1f)) { Text(title, color = Color.White, fontWeight = FontWeight.Medium); Text(description, color = Muted, fontSize = 12.sp); Text(if (granted) "Etkin" else "Etkin değil", color = if (granted) Blue else Color(0xFFFFB86B), fontSize = 12.sp) }; if (!granted) OutlinedButton(onClick = action, shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Blue)) { Text("Etkinleştir", fontSize = 12.sp) } } } }
     @Composable private fun SimpleSection(title: String, eyebrow: String, rows: List<Pair<String, String>>) { Column(Modifier.fillMaxSize().padding(horizontal = 22.dp)) { Header(title, eyebrow); Text(title, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(18.dp)); rows.forEach { (a, b) -> SettingRow(a, b, null) } } }
     @Composable private fun SettingRow(title: String, subtitle: String, action: (() -> Unit)?) { Card(onClick = { action?.invoke() }, shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = Panel), modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)) { Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(title, color = Color.White, fontWeight = FontWeight.Medium); Text(subtitle, color = Muted, fontSize = 12.sp) }; if (action != null) Text("→", color = Blue, fontSize = 22.sp) } } }

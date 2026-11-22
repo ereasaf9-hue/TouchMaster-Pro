@@ -1,32 +1,17 @@
-# TouchMaster Pro — yayın kontrol listesi
+# TouchMaster Pro — yayınlama ve imzalama durumu
 
-## Güncel durum
+## Mevcut GitHub iş akışı
 
-- GitHub deposu `ereasaf9-hue/TouchMaster-Pro` oluşturuldu ve public olarak ayarlandı.
-- İlk sürümün release keystore’u proje deposunun dışında oluşturuldu. Keystore ve güçlü parola dosyası ayrı ve yalnızca yerel çalışma alanında tutuluyor.
-- GitHub bağlantısının mevcut izinleri Actions Secrets yazmaya yetmedi; dört Secret GitHub’a eklenemedi. Bu nedenle Actions üzerinden otomatik yayın, Secrets eklenene kadar çalışmaz.
-- Yayın workflow’u imza Secret’ları yoksa hata verip durur; imzasız APK’yı release’e yüklemez. Geçici anahtar değil, korunması gereken kalıcı keystore kullanılmalıdır.
+Depo `ereasaf9-hue/TouchMaster-Pro` herkese açıktır. `.github/workflows/android-release.yml`, `v*` tag'i gönderildiğinde test, lint, debug/release derlemesi ve APK hash kontrolü yapar; ardından GitHub Release oluşturup `app-debug.apk` ile `app-release-unsigned.apk` dosyalarını ekler.
 
-## Gerekli Actions Secrets
+İş akışı şu anda release keystore kullanmıyor, Actions signing Secret'larını okumuyor ve release APK imzasını doğrulamıyor. `app-release-unsigned.apk` imzasızdır ve doğrudan kurulum için uygun değildir. `app-debug.apk`, debug anahtarıyla imzalanır; farklı bir dağıtım anahtarıyla imzalanmış mevcut uygulamanın üzerine güncelleme olarak kurulamaması mümkündür.
 
-Deponun `Settings > Secrets and variables > Actions` bölümüne şu değerleri ekleyin:
+## İmzalı dağıtım öncesi gerekenler
 
-- `KEYSTORE_BASE64`: release keystore dosyasının Base64 metni
-- `KEYSTORE_PASSWORD`
-- `KEY_ALIAS` (değer: `touchmaster_release`)
-- `KEY_PASSWORD`
+İmzalı APK isteniyorsa önce Gradle'a açık bir release `signingConfig` ekleyin; Secret adlarını ve workflow adımlarını bu yapılandırmayla eşleştirin. Release build sonrasında `apksigner verify` çalıştırıp workflow'u başarısız imzada durdurun. Anahtar parolalarını veya keystore içeriğini kaynak koda, loglara ya da sohbete koymayın. Anahtar yalnızca güvenli, erişimi kısıtlı depoda tutulmalı ve şifreli yedeği saklanmalıdır.
 
-Keystore ve parolayı sohbet, commit, log ya da herkese açık dosya olarak paylaşmayın. Keystore’un şifreli ve güvenli yedeğini saklayın. Anahtar kaybolursa mevcut kullanıcıların uygulama güncellemeleri etkilenebilir.
+Secret eklemeden önce workflow'da bu Secret'ların gerçekten kullanıldığını doğrulayın; mevcut workflow bunları tüketmez. Yerel imzalı build için Gradle signing config de ayrıca eklenmelidir.
 
-## Yayınlama
+## Yayın akışı
 
-`.github/workflows/android-release.yml` workflow’u `workflow_dispatch` ile sürümü (`1.0.0` biçiminde) alır veya `v*` Git tag’iyle tetiklenir. Testleri, lint’i ve iki APK derlemesini çalıştırır; release imzasını ve APK imzasını doğrular; SHA-256 manifesti üretir ve GitHub Release oluşturup APK’ları yükler. Secrets yoksa yayın başarısız olur ve durur.
-
-Secrets eklendikten ve kod depoya gönderildikten sonra workflow’u GitHub Actions ekranından `1.0.0` sürümüyle başlatın veya:
-
-```sh
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-Her yeni uygulama sürümünde `versionCode` artırılmalı; ilk sürüm yapılandırması `versionCode = 1` kullanır.
+Yeni sürüm için `versionCode` artırıp `versionName` güncelleyin, test/lint/derlemeleri çalıştırın, değişiklikleri ana dala gönderin ve ilgili `vX.Y.Z` tag'ini push edin. Tag, mevcut workflow'u tetikler ve imzasız release APK'sını yayımlar. İmzalı APK veya mağaza dağıtımı için yukarıdaki imzalama işleri tamamlanmadan bu workflow'u imzalı dağıtım yolu olarak sunmayın.
