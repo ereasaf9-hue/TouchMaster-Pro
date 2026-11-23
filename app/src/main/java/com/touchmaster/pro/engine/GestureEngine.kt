@@ -3,7 +3,6 @@ package com.touchmaster.pro.engine
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
-import android.os.SystemClock
 import com.touchmaster.pro.data.PointEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -13,7 +12,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 interface GestureExecutor { suspend fun tap(points: List<PointEntry>, width: Int, height: Int, pressMs: Long): Result<Unit>; fun cancel() }
 
 class AccessibilityGestureExecutor(private val service: AccessibilityService) : GestureExecutor {
-    override suspend fun tap(points: List<PointEntry>, width: Int, height: Int, pressMs: Long): Result<Unit> = withContext(Dispatchers.Default) {
+    // Gesture dispatch shares the service's main-thread window/input lifecycle.
+    override suspend fun tap(points: List<PointEntry>, width: Int, height: Int, pressMs: Long): Result<Unit> = withContext(Dispatchers.Main.immediate) {
         if (points.isEmpty()) return@withContext Result.failure(IllegalArgumentException("Bu yönde nokta yok."))
         val builder = GestureDescription.Builder()
         points.forEachIndexed { index, point ->
