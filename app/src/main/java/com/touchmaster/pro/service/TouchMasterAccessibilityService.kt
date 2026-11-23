@@ -158,7 +158,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                     removePanel()
                 }
             }
-            if (bubble != null && markerViews.isEmpty() && activePoints.isNotEmpty()) renderMarkers()
+            if (bubble != null && markerViews.size != activePoints.size && activePoints.isNotEmpty()) renderMarkers()
         } else if (TargetSessionTransitionPolicy.shouldPauseClicker(targetWasForeground, targetPackage, foreground)) {
             // Never let a running clicker continue against an unexpected foreground app.
             if (::clicker.isInitialized && clicker.state.value == EngineState.RUNNING) clicker.pause()
@@ -530,10 +530,19 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         val id = (activePoints.maxOfOrNull { it.id } ?: 0L) + 1L
         activePoints += PointEntry(id, 0.5f, 0.5f, id.toString())
         renderMarkers()
+        scheduleMarkerRepair()
         syncRunningConfiguration()
         updatePanelContent()
         saveProfile()
         Toast.makeText(this, "Hedef eklendi. Numaralı daireyi istediğiniz noktaya sürükleyin.", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun scheduleMarkerRepair() {
+        mainHandler.postDelayed({
+            if (targetPackage != null && activePoints.isNotEmpty() && markerViews.size != activePoints.size) {
+                renderMarkers()
+            }
+        }, 220L)
     }
 
     private fun removeTarget(index: Int) {
