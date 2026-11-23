@@ -171,9 +171,10 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                 bubble = null
                 bubbleParams = null
             }
-            // Keep markers while a transient system window is over an explicitly
-            // open panel; the user is still editing the same target session.
-            if (!panelAttached || foreground !in transientSystemPackages) removeMarkers()
+            // The panel is the target-editing session. Never remove its markers
+            // because of an intermediate window event; doing so made the first
+            // marker disappear until the second add triggered a full redraw.
+            if (!panelAttached) removeMarkers()
         }
     }
 
