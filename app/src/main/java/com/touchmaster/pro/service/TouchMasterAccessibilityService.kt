@@ -419,7 +419,8 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         val targetRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         val targetInfo = label("Numaralı işaretçiyi ekranda sürükleyin", 12, MUTED)
         targetRow.addView(targetInfo, LinearLayout.LayoutParams(0, dp(42), 1f))
-        targetRow.addView(actionText("+ HEDEF EKLE", 116, 40, ACCENT_DARK) { addTarget() })
+        targetRow.addView(actionText("+ HEDEF EKLE", 108, 40, ACCENT_DARK) { addTarget() })
+        targetRow.addView(actionText("− HEDEF KALDIR", 108, 40, STOP_DARK, ::removeLastTarget), marginParams(108, 40, start = 6))
         content.addView(targetRow)
         content.addView(label("Dokununca ayarlanan hızda çalışır. Menü açıkken sürükleyin; uzun basılı tutarak tek tıklayın.", 11, MUTED))
 
@@ -555,6 +556,14 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         updatePanelContent()
         saveProfile()
         Toast.makeText(this, "Hedef $label kaldırıldı.", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun removeLastTarget() {
+        if (activePoints.isEmpty()) {
+            setStatus("Kaldırılacak hedef yok", WARNING)
+            return
+        }
+        removeTarget(activePoints.lastIndex)
     }
 
     @SuppressLint("ClickableViewAccessibility")
