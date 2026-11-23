@@ -87,6 +87,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     private val activePoints = mutableListOf<PointEntry>()
     private val markerViews = mutableListOf<View>()
     private val pendingMarkerLongPresses = mutableListOf<Runnable>()
+    private var activeTargetHoldId: Long? = null
     private var activeSettings = ClickerSettings()
     private var targetPackage: String? = null
     private var targetLabel: String = "Uygulama"
@@ -422,7 +423,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         targetRow.addView(actionText("+ HEDEF EKLE", 108, 40, ACCENT_DARK) { addTarget() })
         targetRow.addView(actionText("− HEDEF KALDIR", 108, 40, STOP_DARK, ::removeLastTarget), marginParams(108, 40, start = 6))
         content.addView(targetRow)
-        content.addView(label("Dokununca ayarlanan hızda çalışır. Menü açıkken sürükleyin; uzun basılı tutarak tek tıklayın.", 11, MUTED))
+        content.addView(label("Hedefte basılı tutunca tekrar tıklar; menü açıkken sürükleyerek taşıyın.", 11, MUTED))
 
         content.addView(sectionTitle("TIKLAMA DAVRANIŞI"))
         intervalText = label("", 12, WHITE, bold = true)
@@ -586,8 +587,10 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                 setOnClickListener { setStatus("Hedef ${index + 1} · tıklamak için basılı tutun", ACCENT) }
             }
             val size = dp(markerSizeDp)
+            // The marker belongs to this connected accessibility service. Its own
+            // window type avoids treating injected target taps as ordinary app overlays.
             val params = WindowManager.LayoutParams(
-                size, size, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                size, size, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
@@ -599,69 +602,83 @@ class TouchMasterAccessibilityService : AccessibilityService() {
                 x = x.coerceIn(0, (metrics.widthPixels - size).coerceAtLeast(0))
                 y = y.coerceIn(dp(24), (metrics.heightPixels - size).coerceAtLeast(dp(24)))
             }
-            var longPressHandled = false
-            var markerMoved = false
-            var downRawX = 0f
-            var downRawY = 0f
+            val markerGesture = TargetMarkerGesture(ViewConfiguration.get(this).scaledTouchSlop.toFloat())
+            val viewLocation = IntArray(2)
+            var markerDragged = false
             val longPressRunnable = Runnable {
-                if (!longPressHandled && !markerMoved && index in activePoints.indices) {
-                    longPressHandled = true
-                    startTargetHold(index)
+                if (markerViews.contains(marker) &&
+                    activePoints.any { it.id == point.id } &&
+                    markerGesture.beginHold()
+                ) {
+                    startTargetHold(point.id)
                 }
             }
             pendingMarkerLongPresses += longPressRunnable
+            fun finishMarkerGesture(targetView: View, completion: TargetMarkerGesture.Completion) {
+                when (completion) {
+                    TargetMarkerGesture.Completion.STOP_HOLD -> stopTargetHold(point.id)
+                    TargetMarkerGesture.Completion.TAP -> targetView.performClick()
+                    else -> Unit
+                }
+                if (markerDragged) {
+                    saveProfile()
+                    syncRunningConfiguration()
+                    markerDragged = false
+                }
+                updatePanelContent()
+            }
             marker.setOnTouchListener { view, event ->
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
-                        longPressHandled = false
-                        markerMoved = false
-                        downRawX = event.rawX
-                        downRawY = event.rawY
-                        if (!panelAttached) {
-                            longPressHandled = true
-                            startTargetHold(index)
-                        }
+                        mainHandler.removeCallbacks(longPressRunnable)
+                        markerGesture.begin(event.getPointerId(event.actionIndex), event.rawX, event.rawY)
+                        markerDragged = false
                         mainHandler.postDelayed(longPressRunnable, ViewConfiguration.getLongPressTimeout().toLong())
                         true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        if (!panelAttached) return@setOnTouchListener true
-                        val slop = ViewConfiguration.get(this).scaledTouchSlop
-                        if (kotlin.math.abs(event.rawX - downRawX) > slop || kotlin.math.abs(event.rawY - downRawY) > slop) {
-                            markerMoved = true
+                        val pointerId = markerGesture.activePointerId ?: return@setOnTouchListener true
+                        val pointerIndex = event.findPointerIndex(pointerId)
+                        if (pointerIndex < 0) return@setOnTouchListener true
+                        view.getLocationOnScreen(viewLocation)
+                        val pointerX = viewLocation[0] + event.getX(pointerIndex)
+                        val pointerY = viewLocation[1] + event.getY(pointerIndex)
+                        val moved = markerGesture.move(pointerId, pointerX, pointerY)
+                        if (moved) {
                             mainHandler.removeCallbacks(longPressRunnable)
-                            pendingMarkerLongPresses.remove(longPressRunnable)
                         }
-                        if (longPressHandled) return@setOnTouchListener true
-                        params.x = (event.rawX - size / 2f).roundToInt().coerceIn(0, (metrics.widthPixels - size).coerceAtLeast(0))
-                        params.y = (event.rawY - size / 2f).roundToInt().coerceIn(dp(24), (metrics.heightPixels - size).coerceAtLeast(dp(24)))
+                        if (!moved || !panelAttached || markerGesture.isHolding) return@setOnTouchListener true
+                        params.x = (pointerX - size / 2f).roundToInt().coerceIn(0, (metrics.widthPixels - size).coerceAtLeast(0))
+                        params.y = (pointerY - size / 2f).roundToInt().coerceIn(dp(24), (metrics.heightPixels - size).coerceAtLeast(dp(24)))
                         try { windowManager.updateViewLayout(view, params) } catch (_: RuntimeException) { }
                         val centerX = params.x + size / 2f
                         val centerY = params.y + size / 2f
-                        if (index in activePoints.indices) {
-                            activePoints[index] = activePoints[index].copy(
+                        val pointIndex = activePoints.indexOfFirst { it.id == point.id }
+                        if (pointIndex >= 0) {
+                            activePoints[pointIndex] = activePoints[pointIndex].copy(
                                 xFrac = (centerX / metrics.widthPixels.coerceAtLeast(1)).coerceIn(0f, 1f),
                                 yFrac = (centerY / metrics.heightPixels.coerceAtLeast(1)).coerceIn(0f, 1f),
                             )
                         }
+                        markerDragged = true
                         true
                     }
                     MotionEvent.ACTION_UP -> {
                         mainHandler.removeCallbacks(longPressRunnable)
-                        pendingMarkerLongPresses.remove(longPressRunnable)
-                        if (longPressHandled) stopTargetHold(index)
-                        else if (!markerMoved) view.performClick()
-                        if (markerMoved) {
-                            saveProfile()
-                            syncRunningConfiguration()
+                        finishMarkerGesture(view, markerGesture.finish(event.getPointerId(event.actionIndex)))
+                        true
+                    }
+                    MotionEvent.ACTION_POINTER_UP -> {
+                        val pointerId = event.getPointerId(event.actionIndex)
+                        if (markerGesture.activePointerId == pointerId) {
+                            mainHandler.removeCallbacks(longPressRunnable)
+                            finishMarkerGesture(view, markerGesture.finish(pointerId))
                         }
-                        updatePanelContent()
                         true
                     }
                     MotionEvent.ACTION_CANCEL -> {
                         mainHandler.removeCallbacks(longPressRunnable)
-                        pendingMarkerLongPresses.remove(longPressRunnable)
-                        if (longPressHandled) stopTargetHold(index)
+                        finishMarkerGesture(view, markerGesture.cancel())
                         true
                     }
                     else -> true
@@ -676,24 +693,31 @@ class TouchMasterAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun startTargetHold(index: Int) {
-        val point = activePoints.getOrNull(index) ?: return
+    private fun startTargetHold(pointId: Long) {
+        val index = activePoints.indexOfFirst { it.id == pointId }
+        if (index < 0) return
+        val point = activePoints[index]
         val width = resources.displayMetrics.widthPixels.coerceAtLeast(1)
         val height = resources.displayMetrics.heightPixels.coerceAtLeast(1)
         // Holding a marker is explicitly time-controlled by the user's finger;
         // do not let the profile's finite repetition count stop it early.
+        activeTargetHoldId = point.id
         clicker.start(listOf(point), activeSettings.copy(repetitions = 0), width, height)
         setStatus("ÇALIŞIYOR · Hedef ${index + 1} · Parmağınızı çekince durur", ACCENT)
         runButton?.text = if (isCompactWidth()) "Duraklat" else "Ⅱ  Duraklat"
     }
 
-    private fun stopTargetHold(index: Int) {
+    private fun stopTargetHold(pointId: Long) {
+        if (activeTargetHoldId != pointId) return
+        activeTargetHoldId = null
         clicker.stop()
         updateRunState(EngineState.OFF)
-        setStatus("DURDURULDU · Hedef ${index + 1}", WARNING)
+        val index = activePoints.indexOfFirst { it.id == pointId }
+        setStatus("DURDURULDU · Hedef ${if (index >= 0) index + 1 else "silindi"}", WARNING)
     }
 
     private fun removeMarkers() {
+        activeTargetHoldId?.let(::stopTargetHold)
         pendingMarkerLongPresses.forEach { mainHandler.removeCallbacks(it) }
         pendingMarkerLongPresses.clear()
         markerViews.forEach { marker -> try { windowManager.removeView(marker) } catch (_: RuntimeException) { } }
@@ -716,6 +740,7 @@ class TouchMasterAccessibilityService : AccessibilityService() {
     }
 
     private fun stopRun() {
+        activeTargetHoldId = null
         clicker.stop()
         updateRunState(EngineState.OFF)
     }
